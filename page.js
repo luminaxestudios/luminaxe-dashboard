@@ -52,25 +52,25 @@ export default function Dashboard() {
     let filtered = data
 
     if (search) {
-      filtered = filtered.filter((i: any) =>
+      filtered = filtered.filter((i) =>
         i.nombre.toLowerCase().includes(search.toLowerCase())
       )
     }
 
     if (provincia) {
-      filtered = filtered.filter((i: any) => i.provincia === provincia)
+      filtered = filtered.filter((i) => i.provincia === provincia)
     }
 
     setFilteredData(filtered)
   }, [search, provincia, data])
 
-  const provincias = [...new Set(data.map((i: any) => i.provincia).filter(Boolean))].sort()
-  const selectedItem = data.find((i: any) => i.id === selectedId)
+  const provincias = [...new Set(data.map((i) => i.provincia).filter(Boolean))].sort()
+  const selectedItem = data.find((i) => i.id === selectedId)
 
   const total = data.length
-  const conVideo = data.filter((i: any) => i.produccion_visual && i.produccion_visual.toLowerCase() !== 'no').length
-  const contactados = data.filter((i: any) => i.contactado).length
-  const agendados = data.filter((i: any) => i.agendado).length
+  const conVideo = data.filter((i) => i.produccion_visual && i.produccion_visual.toLowerCase() !== 'no').length
+  const contactados = data.filter((i) => i.contactado).length
+  const agendados = data.filter((i) => i.agendado).length
 
   if (loading) return <div style={{padding: '2rem'}}>Cargando...</div>
 
@@ -78,7 +78,6 @@ export default function Dashboard() {
     <div style={{maxWidth: '1200px', margin: '0 auto', padding: '2rem'}}>
       <h1>Dashboard Luminaxe</h1>
 
-      {/* Metrics */}
       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '2rem'}}>
         <div style={{padding: '1rem', background: '#f5f5f5', borderRadius: '6px'}}>
           <div style={{fontSize: '12px', color: '#666'}}>TOTAL</div>
@@ -98,7 +97,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Filters */}
       <div style={{display: 'flex', gap: '12px', marginBottom: '1.5rem', flexWrap: 'wrap'}}>
         <input
           type="text"
@@ -113,13 +111,12 @@ export default function Dashboard() {
           style={{padding: '8px', border: '1px solid #ddd', borderRadius: '4px'}}
         >
           <option value="">Todas provincias</option>
-          {provincias.map((p: any) => (
+          {provincias.map((p) => (
             <option key={p} value={p}>{p}</option>
           ))}
         </select>
       </div>
 
-      {/* Table */}
       <div style={{overflowX: 'auto', border: '1px solid #ddd', borderRadius: '4px'}}>
         <table style={{width: '100%', borderCollapse: 'collapse'}}>
           <thead>
@@ -131,7 +128,7 @@ export default function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {filteredData.map((item: any) => (
+            {filteredData.map((item) => (
               <tr 
                 key={item.id} 
                 onClick={() => setSelectedId(item.id)}
@@ -141,7 +138,7 @@ export default function Dashboard() {
                 <td style={{padding: '12px', color: '#666'}}>{item.provincia}</td>
                 <td style={{padding: '12px', textAlign: 'center'}}>{item.viviendas_idealista || 0}</td>
                 <td style={{padding: '12px', textAlign: 'center'}}>
-                  <span style={{display: 'inline-block', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', background: item.produccion_visual?.toLowerCase() !== 'no' ? '#d4edda' : '#fff3cd', color: item.produccion_visual?.toLowerCase() !== 'no' ? '#155724' : '#856404'}}>
+                  <span style={{display: 'inline-block', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', background: item.produccion_visual && item.produccion_visual.toLowerCase() !== 'no' ? '#d4edda' : '#fff3cd', color: item.produccion_visual && item.produccion_visual.toLowerCase() !== 'no' ? '#155724' : '#856404'}}>
                     {item.produccion_visual || 'No'}
                   </span>
                 </td>
@@ -151,7 +148,6 @@ export default function Dashboard() {
         </table>
       </div>
 
-      {/* Detail Panel */}
       {selectedItem && (
         <div style={{marginTop: '2rem', padding: '1.5rem', background: '#f5f5f5', borderRadius: '6px'}}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'start'}}>
