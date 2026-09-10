@@ -9,6 +9,7 @@ export default function Dashboard() {
   const [seleccionada, setSeleccionada] = useState(null);
   const [notas, setNotas] = useState('');
   const [supabase, setSupabase] = useState(null);
+  const [aviso, setAviso] = useState(null);
 
   useEffect(() => {
     const init = async () => {
@@ -18,71 +19,131 @@ export default function Dashboard() {
         'sb_publishable_u5A3pcpkyLXqQa6s2x-pxg_Vci2xypW'
       );
       setSupabase(client);
-      
-      const { data } = await client.from('inmobiliarias').select('*');
-      setInmobiliarias(data || []);
-      
+      await recargar(client);
+
+      // Sintaxis correcta de supabase-js v2
       client
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'inmobiliarias' }, async () => {
-          const { data } = await client.from('inmobiliarias').select('*');
-          setInmobiliarias(data || []);
+        .channel('inmobiliarias-cambios')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'inmobiliarias' }, () => {
+          recargar(client);
         })
         .subscribe();
     };
     init();
   }, []);
 
+  const recargar = async (client) => {
+    const { data, error } = await client.from('inmobiliarias').select('*').order('id');
+    if (error) {
+      setAviso('Error al leer datos: ' + error.message);
+      return;
+    }
+    setInmobiliarias(data || []);
+    setSeleccionada((prev) => (prev ? data.find((i) => i.id === prev.id) || null : null));
+  };
+
   const actualizarEstado = async (id, tipo) => {
     if (!supabase) return;
+    setAviso(null);
 
-    // Actualizar estado local primero
-    const updated = inmobiliarias.map(inmo => {
-      if (inmo.id === id) {
-        return {
-          ...inmo,
-          contactado: tipo === 'contactada',
-          no_contactado: tipo === 'no_contactada',
-          descartado: tipo === 'descartada',
-          agendado: tipo === 'agendada',
-          no_contesta: tipo === 'no_contesta'
-        };
-      }
-      return inmo;
-    });
-    setInmobiliarias(updated);
-    setSeleccionada(updated.find(i => i.id === id) || null);
-
-    // Guardar en BD
-    await supabase.from('inmobiliarias').update({
+    const cambios = {
       contactado: tipo === 'contactada',
       no_contactado: tipo === 'no_contactada',
       descartado: tipo === 'descartada',
       agendado: tipo === 'agendada',
-      no_contesta: tipo === 'no_contesta'
-    }).eq('id', id);
+      no_contesta: tipo === 'no_contesta',
+    };
+
+    // .select() devuelve las filas realmente modificadas.
+    // Si RLS bloquea el UPDATE, data llega vacio y lo detectamos.
+    const { data, error } = await supabase
+      .from('inmobiliarias')
+      .update(cambios)
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      setAviso('No se pudo guardar: ' + error.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setAviso('No se guardo nada. Falta la politica RLS de UPDATE en Supabase.');
+      return;
+    }
+
+    setInmobiliarias((prev) => prev.map((i) => (i.id === id ? data[0] : i)));
+    setSeleccionada(data[0]);
   };
 
   const guardarNotas = async () => {
     if (!seleccionada || !supabase) return;
-    await supabase.from('inmobiliarias').update({ notas }).eq('id', seleccionada.id);
-    setSeleccionada(null);
+    setAviso(null);
+
+    const { data, error } = await supabase
+      .from('inmobiliarias')
+      .update({ notas })
+      .eq('id', seleccionada.id)
+      .select();
+
+    if (error) {
+      setAviso('No se pudieron guardar las notas: ' + error.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setAviso('Las notas no se guardaron. Falta la politica RLS de UPDATE en Supabase.');
+      return;
+    }
+
+    setInmobiliarias((prev) => prev.map((i) => (i.id === seleccionada.id ? data[0] : i)));
+    setSeleccionada(data[0]);
+    setAviso('Notas guardadas.');
   };
 
-  const filtradas = inmobiliarias.filter(inmo => {
+  const filtradas = inmobiliarias.filter((inmo) => {
     const provinciaOk = filtro === 'Todas provincias' || inmo.provincia === filtro;
     const nombreOk = inmo.nombre.toLowerCase().includes(busqueda.toLowerCase());
     return provinciaOk && nombreOk;
   });
 
-  const provincias = ['Todas provincias', ...new Set(inmobiliarias.map(i => i.provincia))];
+  const provincias = ['Todas provincias', ...new Set(inmobiliarias.map((i) => i.provincia))];
   const total = inmobiliarias.length;
-  const conVideo = inmobiliarias.filter(i => i.produccion_visual && i.produccion_visual !== 'Solo fotos').length;
-  const contactadas = inmobiliarias.filter(i => i.contactado).length;
-  const agendadas = inmobiliarias.filter(i => i.agendado).length;
+  const conVideo = inmobiliarias.filter((i) => i.produccion_visual && i.produccion_visual !== 'Solo fotos').length;
+  const contactadas = inmobiliarias.filter((i) => i.contactado).length;
+  const agendadas = inmobiliarias.filter((i) => i.agendado).length;
+
+  const botonEstado = (label, tipo, activo, color) => (
+    <button
+      onClick={() => actualizarEstado(seleccionada.id, tipo)}
+      style={{
+        padding: '12px',
+        fontSize: '14px',
+        fontWeight: 700,
+        border: 'none',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        backgroundColor: activo ? color : '#e5e5e5',
+        color: activo ? 'white' : '#333',
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const etiqueta = (texto, color) => (
+    <span style={{ backgroundColor: color, color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>
+      {texto}
+    </span>
+  );
 
   return (
     <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1400px', margin: '0 auto' }}>
       <h1>Dashboard Luminaxe</h1>
+
+      {aviso && (
+        <div style={{ padding: '10px 14px', marginBottom: '1rem', borderRadius: '4px', backgroundColor: '#fff4e5', border: '1px solid #f59e0b', fontSize: '13px' }}>
+          {aviso}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '2rem' }}>
         <div style={{ backgroundColor: '#f5f5f5', padding: '1rem', borderRadius: '4px' }}>
@@ -116,7 +177,9 @@ export default function Dashboard() {
           onChange={(e) => setFiltro(e.target.value)}
           style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '14px' }}
         >
-          {provincias.map(p => <option key={p} value={p}>{p}</option>)}
+          {provincias.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
         </select>
       </div>
 
@@ -133,10 +196,10 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {filtradas.map(inmo => (
+              {filtradas.map((inmo) => (
                 <tr
                   key={inmo.id}
-                  onClick={() => { setSeleccionada(inmo); setNotas(inmo.notas || ''); }}
+                  onClick={() => { setSeleccionada(inmo); setNotas(inmo.notas || ''); setAviso(null); }}
                   style={{
                     borderBottom: '1px solid #eee',
                     backgroundColor: seleccionada?.id === inmo.id ? '#e8f4f8' : 'white',
@@ -145,15 +208,19 @@ export default function Dashboard() {
                 >
                   <td style={{ padding: '12px' }}><strong>{inmo.nombre}</strong></td>
                   <td style={{ padding: '12px' }}>{inmo.provincia}</td>
-                  <td style={{ padding: '12px' }}><a href={`tel:${inmo.telefono}`} style={{ color: '#0066cc' }}>{inmo.telefono}</a></td>
+                  <td style={{ padding: '12px' }}>
+                    <a href={`tel:${inmo.telefono}`} style={{ color: '#0066cc' }}>{inmo.telefono}</a>
+                  </td>
                   <td style={{ padding: '12px', textAlign: 'center' }}>{inmo.viviendas_idealista}</td>
                   <td style={{ padding: '12px', textAlign: 'center' }}>
-                    {inmo.contactado && <span style={{ backgroundColor: '#16a34a', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>Contactada</span>}
-                    {inmo.no_contactado && <span style={{ backgroundColor: '#f59e0b', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>No contactada</span>}
-                    {inmo.descartado && <span style={{ backgroundColor: '#dc2626', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>Descartada</span>}
-                    {inmo.agendado && <span style={{ backgroundColor: '#2563eb', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>Agendada</span>}
-                    {inmo.no_contesta && <span style={{ backgroundColor: '#8b5cf6', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>No contesta</span>}
-                    {!inmo.contactado && !inmo.no_contactado && !inmo.descartado && !inmo.agendado && !inmo.no_contesta && <span style={{ color: '#999' }}>—</span>}
+                    {inmo.contactado && etiqueta('Contactada', '#16a34a')}
+                    {inmo.no_contactado && etiqueta('No contactada', '#f59e0b')}
+                    {inmo.descartado && etiqueta('Descartada', '#dc2626')}
+                    {inmo.agendado && etiqueta('Agendada', '#2563eb')}
+                    {inmo.no_contesta && etiqueta('No contesta', '#8b5cf6')}
+                    {!inmo.contactado && !inmo.no_contactado && !inmo.descartado && !inmo.agendado && !inmo.no_contesta && (
+                      <span style={{ color: '#999' }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -168,86 +235,11 @@ export default function Dashboard() {
             <div style={{ marginBottom: '1.5rem' }}>
               <p style={{ margin: '0 0 10px 0', fontSize: '11px', color: '#999', fontWeight: 700, textTransform: 'uppercase' }}>Selecciona Estado</p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
-                <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'contactada')}
-                  style={{
-                    padding: '12px',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    backgroundColor: seleccionada.contactado ? '#16a34a' : '#e5e5e5',
-                    color: seleccionada.contactado ? 'white' : '#333',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  ✓ Contactada
-                </button>
-                <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'no_contactada')}
-                  style={{
-                    padding: '12px',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    backgroundColor: seleccionada.no_contactado ? '#f59e0b' : '#e5e5e5',
-                    color: seleccionada.no_contactado ? 'white' : '#333',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  ⏱ No contactada
-                </button>
-                <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'descartada')}
-                  style={{
-                    padding: '12px',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    backgroundColor: seleccionada.descartado ? '#dc2626' : '#e5e5e5',
-                    color: seleccionada.descartado ? 'white' : '#333',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  ✗ Descartada
-                </button>
-                <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'agendada')}
-                  style={{
-                    padding: '12px',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    backgroundColor: seleccionada.agendado ? '#2563eb' : '#e5e5e5',
-                    color: seleccionada.agendado ? 'white' : '#333',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  📅 Agendada
-                </button>
-                <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'no_contesta')}
-                  style={{
-                    padding: '12px',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    backgroundColor: seleccionada.no_contesta ? '#8b5cf6' : '#e5e5e5',
-                    color: seleccionada.no_contesta ? 'white' : '#333',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  ☎️ No contesta
-                </button>
+                {botonEstado('Contactada', 'contactada', seleccionada.contactado, '#16a34a')}
+                {botonEstado('No contactada', 'no_contactada', seleccionada.no_contactado, '#f59e0b')}
+                {botonEstado('Descartada', 'descartada', seleccionada.descartado, '#dc2626')}
+                {botonEstado('Agendada', 'agendada', seleccionada.agendado, '#2563eb')}
+                {botonEstado('No contesta', 'no_contesta', seleccionada.no_contesta, '#8b5cf6')}
               </div>
             </div>
 
@@ -266,7 +258,7 @@ export default function Dashboard() {
                   minHeight: '100px',
                   resize: 'vertical',
                   boxSizing: 'border-box',
-                  fontFamily: 'inherit'
+                  fontFamily: 'inherit',
                 }}
               />
               <button
@@ -281,7 +273,7 @@ export default function Dashboard() {
                   borderRadius: '4px',
                   fontSize: '12px',
                   fontWeight: 600,
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
               >
                 Guardar notas
@@ -297,7 +289,7 @@ export default function Dashboard() {
                 border: '1px solid #ddd',
                 borderRadius: '4px',
                 fontSize: '12px',
-                cursor: 'pointer'
+                cursor: 'pointer',
               }}
             >
               Cerrar
