@@ -43,7 +43,8 @@ export default function Dashboard() {
           contactado: tipo === 'contactada',
           no_contactado: tipo === 'no_contactada',
           descartado: tipo === 'descartada',
-          agendado: tipo === 'agendada'
+          agendado: tipo === 'agendada',
+          no_contesta: tipo === 'no_contesta'
         };
       }
       return inmo;
@@ -56,7 +57,8 @@ export default function Dashboard() {
       contactado: tipo === 'contactada',
       no_contactado: tipo === 'no_contactada',
       descartado: tipo === 'descartada',
-      agendado: tipo === 'agendada'
+      agendado: tipo === 'agendada',
+      no_contesta: tipo === 'no_contesta'
     }).eq('id', id);
   };
 
@@ -150,7 +152,8 @@ export default function Dashboard() {
                     {inmo.no_contactado && <span style={{ backgroundColor: '#f59e0b', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>No contactada</span>}
                     {inmo.descartado && <span style={{ backgroundColor: '#dc2626', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>Descartada</span>}
                     {inmo.agendado && <span style={{ backgroundColor: '#2563eb', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>Agendada</span>}
-                    {!inmo.contactado && !inmo.no_contactado && !inmo.descartado && !inmo.agendado && <span style={{ color: '#999' }}>—</span>}
+                    {inmo.no_contesta && <span style={{ backgroundColor: '#8b5cf6', color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>No contesta</span>}
+                    {!inmo.contactado && !inmo.no_contactado && !inmo.descartado && !inmo.agendado && !inmo.no_contesta && <span style={{ color: '#999' }}>—</span>}
                   </td>
                 </tr>
               ))}
@@ -228,6 +231,22 @@ export default function Dashboard() {
                   }}
                 >
                   📅 Agendada
+                </button>
+                <button
+                  onClick={() => actualizarEstado(seleccionada.id, 'no_contesta')}
+                  style={{
+                    padding: '12px',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    backgroundColor: seleccionada.no_contesta ? '#8b5cf6' : '#e5e5e5',
+                    color: seleccionada.no_contesta ? 'white' : '#333',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  ☎️ No contesta
                 </button>
               </div>
             </div>
