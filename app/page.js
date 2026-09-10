@@ -9,6 +9,7 @@ export default function Dashboard() {
   const [seleccionada, setSeleccionada] = useState(null);
   const [notas, setNotas] = useState('');
   const [supabase, setSupabase] = useState(null);
+  const [actualizando, setActualizando] = useState(false);
 
   useEffect(() => {
     const initSupabase = async () => {
@@ -35,23 +36,49 @@ export default function Dashboard() {
     setInmobiliarias(data || []);
   };
 
-  const actualizarEstado = async (id, estado) => {
-    if (!supabase) return;
-    const updates = {
-      contactado: estado === 'contactada',
-      no_contactado: estado === 'no_contactada',
-      descartado: estado === 'descartada',
-      agendado: estado === 'agendada',
-    };
-    await supabase.from('inmobiliarias').update(updates).eq('id', id);
-    cargarDatos(supabase);
+  const cambiarEstado = async (id, estado) => {
+    if (!supabase || actualizando) return;
+    
+    setActualizando(true);
+    
+    try {
+      const updates = {
+        contactado: estado === 'contactada',
+        no_contactado: estado === 'no_contactada',
+        descartado: estado === 'descartada',
+        agendado: estado === 'agendada',
+      };
+      
+      const { error } = await supabase
+        .from('inmobiliarias')
+        .update(updates)
+        .eq('id', id);
+      
+      if (!error) {
+        await cargarDatos(supabase);
+        if (seleccionada?.id === id) {
+          setSeleccionada({ ...seleccionada, ...updates });
+        }
+      }
+    } catch (err) {
+      console.error('Error al actualizar:', err);
+    } finally {
+      setActualizando(false);
+    }
   };
 
   const guardarNotas = async () => {
     if (!seleccionada || !supabase) return;
-    await supabase.from('inmobiliarias').update({ notas }).eq('id', seleccionada.id);
-    cargarDatos(supabase);
-    setSeleccionada(null);
+    
+    const { error } = await supabase
+      .from('inmobiliarias')
+      .update({ notas })
+      .eq('id', seleccionada.id);
+    
+    if (!error) {
+      cargarDatos(supabase);
+      setSeleccionada(null);
+    }
   };
 
   const filtradas = inmobiliarias.filter((inmo) => {
@@ -121,7 +148,7 @@ export default function Dashboard() {
         </select>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '1.5rem' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
             <thead>
@@ -131,7 +158,7 @@ export default function Dashboard() {
                 <th style={{ textAlign: 'left', padding: '12px', fontWeight: 600 }}>Telefono</th>
                 <th style={{ textAlign: 'center', padding: '12px', fontWeight: 600 }}>Viviendas</th>
                 <th style={{ textAlign: 'center', padding: '12px', fontWeight: 600 }}>Video</th>
-                <th style={{ textAlign: 'center', padding: '12px', fontWeight: 600 }}>Estado</th>
+                <th style={{ textAlign: 'left', padding: '12px', fontWeight: 600 }}>Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -159,11 +186,12 @@ export default function Dashboard() {
                   <td style={{ padding: '12px', textAlign: 'center' }}>
                     {inmo.produccion_visual && inmo.produccion_visual !== 'Solo fotos' ? 'Si' : 'No'}
                   </td>
-                  <td style={{ padding: '12px', textAlign: 'center', fontSize: '12px' }}>
-                    {inmo.contactado && <span style={{ color: '#16a34a' }}>Contactada</span>}
-                    {inmo.descartado && <span style={{ color: '#dc2626' }}>Descartada</span>}
-                    {inmo.agendado && <span style={{ color: '#2563eb' }}>Agendada</span>}
-                    {!inmo.contactado && !inmo.descartado && !inmo.agendado && <span style={{ color: '#999' }}>—</span>}
+                  <td style={{ padding: '12px', fontSize: '13px', fontWeight: 500 }}>
+                    {inmo.contactado && <span style={{ backgroundColor: '#16a34a', color: 'white', padding: '3px 8px', borderRadius: '3px' }}>Contactada</span>}
+                    {inmo.no_contactado && <span style={{ backgroundColor: '#f59e0b', color: 'white', padding: '3px 8px', borderRadius: '3px' }}>No contactada</span>}
+                    {inmo.descartado && <span style={{ backgroundColor: '#dc2626', color: 'white', padding: '3px 8px', borderRadius: '3px' }}>Descartada</span>}
+                    {inmo.agendado && <span style={{ backgroundColor: '#2563eb', color: 'white', padding: '3px 8px', borderRadius: '3px' }}>Agendada</span>}
+                    {!inmo.contactado && !inmo.no_contactado && !inmo.descartado && !inmo.agendado && <span style={{ color: '#999' }}>—</span>}
                   </td>
                 </tr>
               ))}
@@ -186,67 +214,75 @@ export default function Dashboard() {
             <h3 style={{ margin: '0 0 1rem 0', fontSize: '16px' }}>{seleccionada.nombre}</h3>
 
             <div style={{ marginBottom: '1.5rem' }}>
-              <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666', fontWeight: 600 }}>ESTADO</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666', fontWeight: 600 }}>CAMBIAR ESTADO</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
                 <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'contactada')}
+                  onClick={() => cambiarEstado(seleccionada.id, 'contactada')}
+                  disabled={actualizando}
                   style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    border: `2px solid #16a34a`,
-                    backgroundColor: seleccionada.contactado ? '#16a34a' : 'white',
-                    color: seleccionada.contactado ? 'white' : '#16a34a',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
+                    padding: '10px 12px',
+                    fontSize: '13px',
                     fontWeight: 600,
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: actualizando ? 'not-allowed' : 'pointer',
+                    backgroundColor: seleccionada.contactado ? '#16a34a' : '#f3f3f3',
+                    color: seleccionada.contactado ? 'white' : '#333',
+                    opacity: actualizando ? 0.6 : 1,
                   }}
                 >
-                  Contactada
+                  ✓ Contactada
                 </button>
                 <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'no_contactada')}
+                  onClick={() => cambiarEstado(seleccionada.id, 'no_contactada')}
+                  disabled={actualizando}
                   style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    border: `2px solid #f59e0b`,
-                    backgroundColor: seleccionada.no_contactado ? '#f59e0b' : 'white',
-                    color: seleccionada.no_contactado ? 'white' : '#f59e0b',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
+                    padding: '10px 12px',
+                    fontSize: '13px',
                     fontWeight: 600,
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: actualizando ? 'not-allowed' : 'pointer',
+                    backgroundColor: seleccionada.no_contactado ? '#f59e0b' : '#f3f3f3',
+                    color: seleccionada.no_contactado ? 'white' : '#333',
+                    opacity: actualizando ? 0.6 : 1,
                   }}
                 >
-                  No contactada
+                  ⏱ No contactada
                 </button>
                 <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'descartada')}
+                  onClick={() => cambiarEstado(seleccionada.id, 'descartada')}
+                  disabled={actualizando}
                   style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    border: `2px solid #dc2626`,
-                    backgroundColor: seleccionada.descartado ? '#dc2626' : 'white',
-                    color: seleccionada.descartado ? 'white' : '#dc2626',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
+                    padding: '10px 12px',
+                    fontSize: '13px',
                     fontWeight: 600,
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: actualizando ? 'not-allowed' : 'pointer',
+                    backgroundColor: seleccionada.descartado ? '#dc2626' : '#f3f3f3',
+                    color: seleccionada.descartado ? 'white' : '#333',
+                    opacity: actualizando ? 0.6 : 1,
                   }}
                 >
-                  Descartada
+                  ✗ Descartada
                 </button>
                 <button
-                  onClick={() => actualizarEstado(seleccionada.id, 'agendada')}
+                  onClick={() => cambiarEstado(seleccionada.id, 'agendada')}
+                  disabled={actualizando}
                   style={{
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    border: `2px solid #2563eb`,
-                    backgroundColor: seleccionada.agendado ? '#2563eb' : 'white',
-                    color: seleccionada.agendado ? 'white' : '#2563eb',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
+                    padding: '10px 12px',
+                    fontSize: '13px',
                     fontWeight: 600,
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: actualizando ? 'not-allowed' : 'pointer',
+                    backgroundColor: seleccionada.agendado ? '#2563eb' : '#f3f3f3',
+                    color: seleccionada.agendado ? 'white' : '#333',
+                    opacity: actualizando ? 0.6 : 1,
                   }}
                 >
-                  Agendada
+                  📅 Agendada
                 </button>
               </div>
             </div>
@@ -256,7 +292,7 @@ export default function Dashboard() {
               <textarea
                 value={notas}
                 onChange={(e) => setNotas(e.target.value)}
-                placeholder="Anade notas sobre esta inmobiliaria..."
+                placeholder="Añade notas sobre esta inmobiliaria..."
                 style={{
                   width: '100%',
                   padding: '8px',
@@ -264,7 +300,7 @@ export default function Dashboard() {
                   border: '1px solid #ddd',
                   fontSize: '12px',
                   fontFamily: 'inherit',
-                  minHeight: '120px',
+                  minHeight: '100px',
                   resize: 'vertical',
                   boxSizing: 'border-box',
                 }}
