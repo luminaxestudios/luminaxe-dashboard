@@ -2,6 +2,24 @@
 
 import { useEffect, useState } from 'react';
 
+const ESTADOS = [
+  { valor: '', etiqueta: '— Sin estado —', color: '#999' },
+  { valor: 'contactada', etiqueta: 'Contactada', color: '#16a34a' },
+  { valor: 'no_contactada', etiqueta: 'No contactada', color: '#f59e0b' },
+  { valor: 'descartada', etiqueta: 'Descartada', color: '#dc2626' },
+  { valor: 'agendada', etiqueta: 'Agendada', color: '#2563eb' },
+  { valor: 'no_contesta', etiqueta: 'No contesta', color: '#8b5cf6' },
+];
+
+function estadoDe(inmo) {
+  if (inmo.contactado) return 'contactada';
+  if (inmo.no_contactado) return 'no_contactada';
+  if (inmo.descartado) return 'descartada';
+  if (inmo.agendado) return 'agendada';
+  if (inmo.no_contesta) return 'no_contesta';
+  return '';
+}
+
 export default function Dashboard() {
   const [inmobiliarias, setInmobiliarias] = useState([]);
   const [filtro, setFiltro] = useState('Todas provincias');
@@ -21,7 +39,6 @@ export default function Dashboard() {
       setSupabase(client);
       await recargar(client);
 
-      // Sintaxis correcta de supabase-js v2
       client
         .channel('inmobiliarias-cambios')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'inmobiliarias' }, () => {
@@ -42,7 +59,7 @@ export default function Dashboard() {
     setSeleccionada((prev) => (prev ? data.find((i) => i.id === prev.id) || null : null));
   };
 
-  const actualizarEstado = async (id, tipo) => {
+  const cambiarEstado = async (id, tipo) => {
     if (!supabase) return;
     setAviso(null);
 
@@ -54,8 +71,6 @@ export default function Dashboard() {
       no_contesta: tipo === 'no_contesta',
     };
 
-    // .select() devuelve las filas realmente modificadas.
-    // Si RLS bloquea el UPDATE, data llega vacio y lo detectamos.
     const { data, error } = await supabase
       .from('inmobiliarias')
       .update(cambios)
@@ -111,29 +126,19 @@ export default function Dashboard() {
   const contactadas = inmobiliarias.filter((i) => i.contactado).length;
   const agendadas = inmobiliarias.filter((i) => i.agendado).length;
 
-  const botonEstado = (label, tipo, activo, color) => (
-    <button
-      onClick={() => actualizarEstado(seleccionada.id, tipo)}
-      style={{
-        padding: '12px',
-        fontSize: '14px',
-        fontWeight: 700,
-        border: 'none',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        backgroundColor: activo ? color : '#e5e5e5',
-        color: activo ? 'white' : '#333',
-      }}
-    >
-      {label}
-    </button>
-  );
+  const etiquetaEstado = (inmo) => {
+    const actual = estadoDe(inmo);
+    if (!actual) return <span style={{ color: '#999' }}>—</span>;
+    const def = ESTADOS.find((e) => e.valor === actual);
+    return (
+      <span style={{ backgroundColor: def.color, color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>
+        {def.etiqueta}
+      </span>
+    );
+  };
 
-  const etiqueta = (texto, color) => (
-    <span style={{ backgroundColor: color, color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>
-      {texto}
-    </span>
-  );
+  const estadoActual = seleccionada ? estadoDe(seleccionada) : '';
+  const colorActual = ESTADOS.find((e) => e.valor === estadoActual)?.color || '#ddd';
 
   return (
     <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1400px', margin: '0 auto' }}>
@@ -212,16 +217,7 @@ export default function Dashboard() {
                     <a href={`tel:${inmo.telefono}`} style={{ color: '#0066cc' }}>{inmo.telefono}</a>
                   </td>
                   <td style={{ padding: '12px', textAlign: 'center' }}>{inmo.viviendas_idealista}</td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>
-                    {inmo.contactado && etiqueta('Contactada', '#16a34a')}
-                    {inmo.no_contactado && etiqueta('No contactada', '#f59e0b')}
-                    {inmo.descartado && etiqueta('Descartada', '#dc2626')}
-                    {inmo.agendado && etiqueta('Agendada', '#2563eb')}
-                    {inmo.no_contesta && etiqueta('No contesta', '#8b5cf6')}
-                    {!inmo.contactado && !inmo.no_contactado && !inmo.descartado && !inmo.agendado && !inmo.no_contesta && (
-                      <span style={{ color: '#999' }}>—</span>
-                    )}
-                  </td>
+                  <td style={{ padding: '12px', textAlign: 'center' }}>{etiquetaEstado(inmo)}</td>
                 </tr>
               ))}
             </tbody>
@@ -233,14 +229,27 @@ export default function Dashboard() {
             <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '16px', fontWeight: 700 }}>{seleccionada.nombre}</h3>
 
             <div style={{ marginBottom: '1.5rem' }}>
-              <p style={{ margin: '0 0 10px 0', fontSize: '11px', color: '#999', fontWeight: 700, textTransform: 'uppercase' }}>Selecciona Estado</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
-                {botonEstado('Contactada', 'contactada', seleccionada.contactado, '#16a34a')}
-                {botonEstado('No contactada', 'no_contactada', seleccionada.no_contactado, '#f59e0b')}
-                {botonEstado('Descartada', 'descartada', seleccionada.descartado, '#dc2626')}
-                {botonEstado('Agendada', 'agendada', seleccionada.agendado, '#2563eb')}
-                {botonEstado('No contesta', 'no_contesta', seleccionada.no_contesta, '#8b5cf6')}
-              </div>
+              <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#999', fontWeight: 700, textTransform: 'uppercase' }}>Estado</p>
+              <select
+                value={estadoActual}
+                onChange={(e) => cambiarEstado(seleccionada.id, e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  borderRadius: '4px',
+                  border: `2px solid ${colorActual}`,
+                  backgroundColor: 'white',
+                  color: estadoActual ? colorActual : '#666',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {ESTADOS.map((e) => (
+                  <option key={e.valor} value={e.valor}>{e.etiqueta}</option>
+                ))}
+              </select>
             </div>
 
             <div style={{ marginBottom: '1.5rem' }}>
