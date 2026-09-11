@@ -20,12 +20,22 @@ function estadoDe(inmo) {
   return '';
 }
 
+function colorDe(valor) {
+  return ESTADOS.find((e) => e.valor === valor)?.color || '#999';
+}
+
+function ajustarAltura(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
 export default function Dashboard() {
   const [inmobiliarias, setInmobiliarias] = useState([]);
   const [filtro, setFiltro] = useState('Todas provincias');
   const [busqueda, setBusqueda] = useState('');
-  const [seleccionada, setSeleccionada] = useState(null);
-  const [notas, setNotas] = useState('');
+  const [borradores, setBorradores] = useState({});
+  const [guardadaAhora, setGuardadaAhora] = useState(null);
   const [supabase, setSupabase] = useState(null);
   const [aviso, setAviso] = useState(null);
 
@@ -56,7 +66,6 @@ export default function Dashboard() {
       return;
     }
     setInmobiliarias(data || []);
-    setSeleccionada((prev) => (prev ? data.find((i) => i.id === prev.id) || null : null));
   };
 
   const cambiarEstado = async (id, tipo) => {
@@ -87,17 +96,20 @@ export default function Dashboard() {
     }
 
     setInmobiliarias((prev) => prev.map((i) => (i.id === id ? data[0] : i)));
-    setSeleccionada(data[0]);
   };
 
-  const guardarNotas = async () => {
-    if (!seleccionada || !supabase) return;
+  const guardarNotas = async (inmo) => {
+    if (!supabase) return;
+    const texto = borradores[inmo.id];
+    if (texto === undefined) return;
+    if (texto === (inmo.notas || '')) return;
+
     setAviso(null);
 
     const { data, error } = await supabase
       .from('inmobiliarias')
-      .update({ notas })
-      .eq('id', seleccionada.id)
+      .update({ notas: texto })
+      .eq('id', inmo.id)
       .select();
 
     if (error) {
@@ -109,9 +121,9 @@ export default function Dashboard() {
       return;
     }
 
-    setInmobiliarias((prev) => prev.map((i) => (i.id === seleccionada.id ? data[0] : i)));
-    setSeleccionada(data[0]);
-    setAviso('Notas guardadas.');
+    setInmobiliarias((prev) => prev.map((i) => (i.id === inmo.id ? data[0] : i)));
+    setGuardadaAhora(inmo.id);
+    setTimeout(() => setGuardadaAhora((actual) => (actual === inmo.id ? null : actual)), 1500);
   };
 
   const filtradas = inmobiliarias.filter((inmo) => {
@@ -126,22 +138,11 @@ export default function Dashboard() {
   const contactadas = inmobiliarias.filter((i) => i.contactado).length;
   const agendadas = inmobiliarias.filter((i) => i.agendado).length;
 
-  const etiquetaEstado = (inmo) => {
-    const actual = estadoDe(inmo);
-    if (!actual) return <span style={{ color: '#999' }}>—</span>;
-    const def = ESTADOS.find((e) => e.valor === actual);
-    return (
-      <span style={{ backgroundColor: def.color, color: 'white', padding: '4px 12px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>
-        {def.etiqueta}
-      </span>
-    );
-  };
-
-  const estadoActual = seleccionada ? estadoDe(seleccionada) : '';
-  const colorActual = ESTADOS.find((e) => e.valor === estadoActual)?.color || '#ddd';
+  const th = { textAlign: 'left', padding: '10px 12px', fontWeight: 700, fontSize: '12px', color: '#555' };
+  const td = { padding: '8px 12px', verticalAlign: 'top' };
 
   return (
-    <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1400px', margin: '0 auto' }}>
+    <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1600px', margin: '0 auto' }}>
       <h1>Dashboard Luminaxe</h1>
 
       {aviso && (
@@ -188,123 +189,101 @@ export default function Dashboard() {
         </select>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '1.5rem' }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #ddd', backgroundColor: '#f9f9f9' }}>
-                <th style={{ textAlign: 'left', padding: '12px', fontWeight: 700 }}>Nombre</th>
-                <th style={{ textAlign: 'left', padding: '12px', fontWeight: 700 }}>Provincia</th>
-                <th style={{ textAlign: 'left', padding: '12px', fontWeight: 700 }}>Telefono</th>
-                <th style={{ textAlign: 'center', padding: '12px', fontWeight: 700 }}>Viviendas</th>
-                <th style={{ textAlign: 'center', padding: '12px', fontWeight: 700 }}>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtradas.map((inmo) => (
-                <tr
-                  key={inmo.id}
-                  onClick={() => { setSeleccionada(inmo); setNotas(inmo.notas || ''); setAviso(null); }}
-                  style={{
-                    borderBottom: '1px solid #eee',
-                    backgroundColor: seleccionada?.id === inmo.id ? '#e8f4f8' : 'white',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <td style={{ padding: '12px' }}><strong>{inmo.nombre}</strong></td>
-                  <td style={{ padding: '12px' }}>{inmo.provincia}</td>
-                  <td style={{ padding: '12px' }}>
-                    <a href={`tel:${inmo.telefono}`} style={{ color: '#0066cc' }}>{inmo.telefono}</a>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #ddd', backgroundColor: '#f9f9f9' }}>
+              <th style={{ ...th, width: '20%' }}>Nombre</th>
+              <th style={{ ...th, width: '10%' }}>Provincia</th>
+              <th style={{ ...th, width: '10%' }}>Telefono</th>
+              <th style={{ ...th, width: '7%', textAlign: 'center' }}>Viviendas</th>
+              <th style={{ ...th, width: '16%' }}>Estado</th>
+              <th style={{ ...th, width: '37%' }}>Anotaciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtradas.map((inmo) => {
+              const actual = estadoDe(inmo);
+              const color = colorDe(actual);
+              const texto = borradores[inmo.id] !== undefined ? borradores[inmo.id] : (inmo.notas || '');
+              return (
+                <tr key={inmo.id} style={{ borderBottom: '1px solid #eee' }}>
+                  <td style={td}>
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(inmo.nombre)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#0f172a', fontWeight: 700, textDecoration: 'none', borderBottom: '1px dotted #94a3b8' }}
+                      title="Buscar en Google"
+                    >
+                      {inmo.nombre}
+                    </a>
                   </td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>{inmo.viviendas_idealista}</td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>{etiquetaEstado(inmo)}</td>
+                  <td style={td}>{inmo.provincia}</td>
+                  <td style={td}>
+                    <a href={`tel:${inmo.telefono}`} style={{ color: '#0066cc', textDecoration: 'none' }}>{inmo.telefono}</a>
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>{inmo.viviendas_idealista}</td>
+                  <td style={td}>
+                    <select
+                      value={actual}
+                      onChange={(e) => cambiarEstado(inmo.id, e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '6px 8px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        borderRadius: '4px',
+                        border: `2px solid ${actual ? color : '#ddd'}`,
+                        backgroundColor: 'white',
+                        color: actual ? color : '#666',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      {ESTADOS.map((e) => (
+                        <option key={e.valor} value={e.valor}>{e.etiqueta}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={td}>
+                    <div style={{ position: 'relative' }}>
+                      <textarea
+                        ref={ajustarAltura}
+                        value={texto}
+                        rows={1}
+                        placeholder="Anotaciones..."
+                        onChange={(e) => {
+                          ajustarAltura(e.target);
+                          setBorradores((prev) => ({ ...prev, [inmo.id]: e.target.value }));
+                        }}
+                        onBlur={() => guardarNotas(inmo)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          borderRadius: '4px',
+                          border: '1px solid #ddd',
+                          fontSize: '12px',
+                          fontFamily: 'inherit',
+                          lineHeight: 1.4,
+                          resize: 'none',
+                          overflow: 'hidden',
+                          boxSizing: 'border-box',
+                          display: 'block',
+                        }}
+                      />
+                      {guardadaAhora === inmo.id && (
+                        <span style={{ position: 'absolute', right: '6px', top: '-14px', fontSize: '10px', color: '#16a34a', fontWeight: 700 }}>
+                          guardado
+                        </span>
+                      )}
+                    </div>
+                  </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {seleccionada && (
-          <div style={{ backgroundColor: '#f9f9f9', border: '1px solid #ddd', borderRadius: '8px', padding: '1.5rem', height: 'fit-content', position: 'sticky', top: '20px' }}>
-            <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '16px', fontWeight: 700 }}>{seleccionada.nombre}</h3>
-
-            <div style={{ marginBottom: '1.5rem' }}>
-              <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#999', fontWeight: 700, textTransform: 'uppercase' }}>Estado</p>
-              <select
-                value={estadoActual}
-                onChange={(e) => cambiarEstado(seleccionada.id, e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  borderRadius: '4px',
-                  border: `2px solid ${colorActual}`,
-                  backgroundColor: 'white',
-                  color: estadoActual ? colorActual : '#666',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                }}
-              >
-                {ESTADOS.map((e) => (
-                  <option key={e.valor} value={e.valor}>{e.etiqueta}</option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '1.5rem' }}>
-              <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#999', fontWeight: 700, textTransform: 'uppercase' }}>Anotaciones</p>
-              <textarea
-                value={notas}
-                onChange={(e) => setNotas(e.target.value)}
-                placeholder="Anade notas..."
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: '1px solid #ddd',
-                  fontSize: '12px',
-                  minHeight: '100px',
-                  resize: 'vertical',
-                  boxSizing: 'border-box',
-                  fontFamily: 'inherit',
-                }}
-              />
-              <button
-                onClick={guardarNotas}
-                style={{
-                  width: '100%',
-                  marginTop: '8px',
-                  padding: '8px',
-                  backgroundColor: '#333',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Guardar notas
-              </button>
-            </div>
-
-            <button
-              onClick={() => setSeleccionada(null)}
-              style={{
-                width: '100%',
-                padding: '8px',
-                backgroundColor: '#f0f0f0',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '12px',
-                cursor: 'pointer',
-              }}
-            >
-              Cerrar
-            </button>
-          </div>
-        )}
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
