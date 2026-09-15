@@ -34,6 +34,7 @@ export default function Dashboard() {
   const [inmobiliarias, setInmobiliarias] = useState([]);
   const [filtro, setFiltro] = useState('Todas provincias');
   const [busqueda, setBusqueda] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('todos');
   const [borradores, setBorradores] = useState({});
   const [guardadaAhora, setGuardadaAhora] = useState(null);
   const [supabase, setSupabase] = useState(null);
@@ -126,11 +127,22 @@ export default function Dashboard() {
     setTimeout(() => setGuardadaAhora((actual) => (actual === inmo.id ? null : actual)), 1500);
   };
 
-  const filtradas = inmobiliarias.filter((inmo) => {
+  // Filtro por provincia + búsqueda (sin estado): sirve para contar cuántas hay de cada estado
+  const baseFiltrada = inmobiliarias.filter((inmo) => {
     const provinciaOk = filtro === 'Todas provincias' || inmo.provincia === filtro;
-    const nombreOk = inmo.nombre.toLowerCase().includes(busqueda.toLowerCase());
+    const nombreOk = (inmo.nombre || '').toLowerCase().includes(busqueda.toLowerCase());
     return provinciaOk && nombreOk;
   });
+
+  const conteoEstados = baseFiltrada.reduce((acc, inmo) => {
+    const e = estadoDe(inmo);
+    acc[e] = (acc[e] || 0) + 1;
+    return acc;
+  }, {});
+
+  const filtradas = baseFiltrada.filter(
+    (inmo) => filtroEstado === 'todos' || estadoDe(inmo) === filtroEstado
+  );
 
   const provincias = ['Todas provincias', ...new Set(inmobiliarias.map((i) => i.provincia))];
   const total = inmobiliarias.length;
@@ -188,6 +200,37 @@ export default function Dashboard() {
           ))}
         </select>
       </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '1.5rem' }}>
+        {[{ valor: 'todos', etiqueta: 'Todos', color: '#0f172a' }, ...ESTADOS.slice(1), { ...ESTADOS[0], etiqueta: 'Sin estado' }].map((e) => {
+          const activo = filtroEstado === e.valor;
+          const n = e.valor === 'todos' ? baseFiltrada.length : conteoEstados[e.valor] || 0;
+          return (
+            <button
+              key={e.valor || 'sin'}
+              onClick={() => setFiltroEstado(e.valor)}
+              aria-pressed={activo}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '999px',
+                border: `2px solid ${e.color}`,
+                backgroundColor: activo ? e.color : 'white',
+                color: activo ? 'white' : e.color,
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {e.etiqueta} ({n})
+            </button>
+          );
+        })}
+      </div>
+
+      {filtradas.length === 0 && inmobiliarias.length > 0 && (
+        <p style={{ color: '#666', fontSize: '13px' }}>Ninguna inmobiliaria con este estado. Pulsa "Todos" para ver la lista completa.</p>
+      )}
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
