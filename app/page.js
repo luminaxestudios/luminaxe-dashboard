@@ -1,15 +1,31 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const ESTADOS = [
-  { valor: '', etiqueta: '— Sin estado —', color: '#999' },
+  { valor: '', etiqueta: '\u2014 Sin estado \u2014', color: '#999' },
   { valor: 'contactada', etiqueta: 'Contactada', color: '#16a34a' },
   { valor: 'no_contactada', etiqueta: 'No contactada', color: '#f59e0b' },
   { valor: 'descartada', etiqueta: 'Descartada', color: '#dc2626' },
   { valor: 'agendada', etiqueta: 'Agendada', color: '#2563eb' },
   { valor: 'no_contesta', etiqueta: 'No contesta', color: '#8b5cf6' },
 ];
+
+const PESTANAS = [
+  { id: 'guion', etiqueta: 'Gui\u00f3n', ph: 'Apertura, gancho, pregunta de calificaci\u00f3n, propuesta, cierre...' },
+  { id: 'tono', etiqueta: 'Tono', ph: 'Tuteo o usted, ritmo, frases a evitar, frases que funcionan...' },
+  { id: 'objeciones', etiqueta: 'Objeciones', ph: '"Ya tenemos v\u00eddeo" \u2192 ...\n"No tengo tiempo" \u2192 ...\n"Cu\u00e1nto cuesta" \u2192 ...' },
+  { id: 'oferta', etiqueta: 'Oferta y cierre', ph: 'Qu\u00e9 ofrecemos, precio orientativo, enlace a la demo, siguiente paso \u00fanico...' },
+  { id: 'aprendizajes', etiqueta: 'Aprendizajes', ph: 'Fecha \u2014 qu\u00e9 funcion\u00f3 / qu\u00e9 fall\u00f3 en las llamadas...' },
+  { id: 'plantillas', etiqueta: 'Plantillas', ph: 'WhatsApp / email de seguimiento listos para copiar...' },
+];
+
+const ETIQUETA_GUARDADO = {
+  cargando: 'Cargando...',
+  guardando: 'Guardando...',
+  guardado: 'Guardado',
+  error: 'Error: revisa que exista la tabla notas en Supabase',
+};
 
 function estadoDe(inmo) {
   if (inmo.contactado) return 'contactada';
@@ -40,6 +56,11 @@ export default function Dashboard() {
   const [supabase, setSupabase] = useState(null);
   const [aviso, setAviso] = useState(null);
 
+  const [pestana, setPestana] = useState('guion');
+  const [notasGenerales, setNotasGenerales] = useState({});
+  const [estadoNotas, setEstadoNotas] = useState('cargando');
+  const timersNotas = useRef({});
+
   useEffect(() => {
     const init = async () => {
       const { createClient } = await import('@supabase/supabase-js');
@@ -49,6 +70,7 @@ export default function Dashboard() {
       );
       setSupabase(client);
       await recargar(client);
+      await cargarNotasGenerales(client);
 
       client
         .channel('inmobiliarias-cambios')
@@ -67,6 +89,33 @@ export default function Dashboard() {
       return;
     }
     setInmobiliarias(data || []);
+  };
+
+  const cargarNotasGenerales = async (client) => {
+    const { data, error } = await client.from('notas').select('id, contenido');
+    if (error) {
+      setEstadoNotas('error');
+      return;
+    }
+    const m = {};
+    (data || []).forEach((r) => {
+      m[r.id] = r.contenido || '';
+    });
+    setNotasGenerales(m);
+    setEstadoNotas('guardado');
+  };
+
+  const cambiarNotaGeneral = (id, valor) => {
+    setNotasGenerales((prev) => ({ ...prev, [id]: valor }));
+    setEstadoNotas('guardando');
+    if (timersNotas.current[id]) clearTimeout(timersNotas.current[id]);
+    timersNotas.current[id] = setTimeout(async () => {
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('notas')
+        .upsert({ id, contenido: valor, updated_at: new Date().toISOString() });
+      setEstadoNotas(error ? 'error' : 'guardado');
+    }, 800);
   };
 
   const cambiarEstado = async (id, tipo) => {
@@ -127,7 +176,7 @@ export default function Dashboard() {
     setTimeout(() => setGuardadaAhora((actual) => (actual === inmo.id ? null : actual)), 1500);
   };
 
-  // Filtro por provincia + búsqueda (sin estado): sirve para contar cuántas hay de cada estado
+  // Filtro por provincia + busqueda (sin estado): sirve para contar cuantas hay de cada estado
   const baseFiltrada = inmobiliarias.filter((inmo) => {
     const provinciaOk = filtro === 'Todas provincias' || inmo.provincia === filtro;
     const nombreOk = (inmo.nombre || '').toLowerCase().includes(busqueda.toLowerCase());
@@ -145,13 +194,11 @@ export default function Dashboard() {
   );
 
   const provincias = ['Todas provincias', ...new Set(inmobiliarias.map((i) => i.provincia))];
-  const total = inmobiliarias.length;
-  const conVideo = inmobiliarias.filter((i) => i.produccion_visual && i.produccion_visual !== 'Solo fotos').length;
-  const contactadas = inmobiliarias.filter((i) => i.contactado).length;
-  const agendadas = inmobiliarias.filter((i) => i.agendado).length;
 
   const th = { textAlign: 'left', padding: '10px 12px', fontWeight: 700, fontSize: '12px', color: '#555' };
   const td = { padding: '8px 12px', verticalAlign: 'top' };
+
+  const pestanaActiva = PESTANAS.find((p) => p.id === pestana) || PESTANAS[0];
 
   return (
     <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1600px', margin: '0 auto' }}>
@@ -163,23 +210,63 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '2rem' }}>
-        <div style={{ backgroundColor: '#f5f5f5', padding: '1rem', borderRadius: '4px' }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666' }}>TOTAL</p>
-          <p style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>{total}</p>
+      <div style={{ backgroundColor: '#f5f5f5', padding: '1rem', borderRadius: '4px', marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <span style={{ fontSize: '12px', color: '#666', fontWeight: 700, marginRight: '4px' }}>NOTAS</span>
+          {PESTANAS.map((p) => {
+            const activa = pestana === p.id;
+            return (
+              <button
+                key={p.id}
+                onClick={() => setPestana(p.id)}
+                aria-pressed={activa}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '999px',
+                  border: '2px solid #0f172a',
+                  backgroundColor: activa ? '#0f172a' : 'white',
+                  color: activa ? 'white' : '#0f172a',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {p.etiqueta}
+              </button>
+            );
+          })}
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: '11px',
+              fontWeight: 700,
+              color: estadoNotas === 'error' ? '#dc2626' : estadoNotas === 'guardado' ? '#16a34a' : '#666',
+            }}
+          >
+            {ETIQUETA_GUARDADO[estadoNotas]}
+          </span>
         </div>
-        <div style={{ backgroundColor: '#f5f5f5', padding: '1rem', borderRadius: '4px' }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666' }}>CON VIDEO</p>
-          <p style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>{conVideo} ({total ? Math.round((conVideo / total) * 100) : 0}%)</p>
-        </div>
-        <div style={{ backgroundColor: '#f5f5f5', padding: '1rem', borderRadius: '4px' }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666' }}>CONTACTADAS</p>
-          <p style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>{contactadas}</p>
-        </div>
-        <div style={{ backgroundColor: '#f5f5f5', padding: '1rem', borderRadius: '4px' }}>
-          <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666' }}>AGENDADAS</p>
-          <p style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>{agendadas}</p>
-        </div>
+        <textarea
+          value={notasGenerales[pestana] || ''}
+          onChange={(e) => cambiarNotaGeneral(pestana, e.target.value)}
+          placeholder={pestanaActiva.ph}
+          disabled={estadoNotas === 'cargando'}
+          style={{
+            width: '100%',
+            minHeight: '200px',
+            padding: '10px 12px',
+            borderRadius: '4px',
+            border: '1px solid #ddd',
+            fontSize: '13px',
+            fontFamily: 'inherit',
+            lineHeight: 1.5,
+            resize: 'vertical',
+            boxSizing: 'border-box',
+            display: 'block',
+            backgroundColor: 'white',
+          }}
+        />
       </div>
 
       <div style={{ display: 'flex', gap: '12px', marginBottom: '1.5rem' }}>
