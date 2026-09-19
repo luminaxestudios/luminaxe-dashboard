@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 
 const ESTADOS = [
   { valor: '', etiqueta: '\u2014 Sin estado \u2014', color: '#999' },
-  { valor: 'contactada', etiqueta: 'Contactada', color: '#16a34a' },
+  { valor: 'interesado_rafael', etiqueta: 'Interesados (Rafael)', color: '#0d9488' },
+  { valor: 'interesado_gonzalo', etiqueta: 'Interesados (Gonzalo)', color: '#db2777' },
   { valor: 'no_contactada', etiqueta: 'No contactada', color: '#f59e0b' },
   { valor: 'descartada', etiqueta: 'Descartada', color: '#dc2626' },
   { valor: 'agendada', etiqueta: 'Agendada', color: '#2563eb' },
@@ -28,7 +29,8 @@ const ETIQUETA_GUARDADO = {
 };
 
 function estadoDe(inmo) {
-  if (inmo.contactado) return 'contactada';
+  if (inmo.interesado_rafael) return 'interesado_rafael';
+  if (inmo.interesado_gonzalo) return 'interesado_gonzalo';
   if (inmo.no_contactado) return 'no_contactada';
   if (inmo.descartado) return 'descartada';
   if (inmo.agendado) return 'agendada';
@@ -123,7 +125,9 @@ export default function Dashboard() {
     setAviso(null);
 
     const cambios = {
-      contactado: tipo === 'contactada',
+      contactado: false,
+      interesado_rafael: tipo === 'interesado_rafael',
+      interesado_gonzalo: tipo === 'interesado_gonzalo',
       no_contactado: tipo === 'no_contactada',
       descartado: tipo === 'descartada',
       agendado: tipo === 'agendada',
