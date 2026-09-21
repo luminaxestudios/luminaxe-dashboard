@@ -4,13 +4,19 @@ import { useEffect, useRef, useState } from 'react';
 
 const ESTADOS = [
   { valor: '', etiqueta: '\u2014 Sin estado \u2014', color: '#999' },
-  { valor: 'interesado_rafael', etiqueta: 'Interesados (Rafael)', color: '#0d9488' },
-  { valor: 'interesado_gonzalo', etiqueta: 'Interesados (Gonzalo)', color: '#db2777' },
-  { valor: 'no_contactada', etiqueta: 'No contactada', color: '#f59e0b' },
-  { valor: 'descartada', etiqueta: 'Descartada', color: '#dc2626' },
-  { valor: 'agendada', etiqueta: 'Agendada', color: '#2563eb' },
-  { valor: 'no_contesta', etiqueta: 'No contesta', color: '#8b5cf6' },
+  { valor: 'rafael', etiqueta: 'Rafael', color: '#0d9488' },
+  { valor: 'gonzalo', etiqueta: 'Gonzalo', color: '#db2777' },
+  { valor: 'descartada', etiqueta: 'Descartadas', color: '#dc2626' },
 ];
+
+const SUBESTADOS = [
+  { valor: 'agendados', etiqueta: 'Agendados', color: '#2563eb' },
+  { valor: 'manda_info', etiqueta: 'Manda info', color: '#f59e0b' },
+  { valor: 'para_llamar', etiqueta: 'Para llamar', color: '#8b5cf6' },
+];
+
+// Estados que admiten subestado
+const CON_SUBESTADO = ['rafael', 'gonzalo'];
 
 const PESTANAS = [
   { id: 'guion', etiqueta: 'Gui\u00f3n', ph: 'Apertura, gancho, pregunta de calificaci\u00f3n, propuesta, cierre...' },
@@ -29,17 +35,19 @@ const ETIQUETA_GUARDADO = {
 };
 
 function estadoDe(inmo) {
-  if (inmo.interesado_rafael) return 'interesado_rafael';
-  if (inmo.interesado_gonzalo) return 'interesado_gonzalo';
-  if (inmo.no_contactado) return 'no_contactada';
-  if (inmo.descartado) return 'descartada';
-  if (inmo.agendado) return 'agendada';
-  if (inmo.no_contesta) return 'no_contesta';
-  return '';
+  return inmo.estado || '';
+}
+
+function subestadoDe(inmo) {
+  return inmo.subestado || '';
 }
 
 function colorDe(valor) {
   return ESTADOS.find((e) => e.valor === valor)?.color || '#999';
+}
+
+function colorSubDe(valor) {
+  return SUBESTADOS.find((e) => e.valor === valor)?.color || '#999';
 }
 
 function ajustarAltura(el) {
@@ -53,6 +61,7 @@ export default function Dashboard() {
   const [filtro, setFiltro] = useState('Todas provincias');
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('todos');
+  const [filtroSub, setFiltroSub] = useState('');
   const [borradores, setBorradores] = useState({});
   const [guardadaAhora, setGuardadaAhora] = useState(null);
   const [supabase, setSupabase] = useState(null);
@@ -120,19 +129,9 @@ export default function Dashboard() {
     }, 800);
   };
 
-  const cambiarEstado = async (id, tipo) => {
+  const actualizar = async (id, cambios) => {
     if (!supabase) return;
     setAviso(null);
-
-    const cambios = {
-      contactado: false,
-      interesado_rafael: tipo === 'interesado_rafael',
-      interesado_gonzalo: tipo === 'interesado_gonzalo',
-      no_contactado: tipo === 'no_contactada',
-      descartado: tipo === 'descartada',
-      agendado: tipo === 'agendada',
-      no_contesta: tipo === 'no_contesta',
-    };
 
     const { data, error } = await supabase
       .from('inmobiliarias')
@@ -151,6 +150,10 @@ export default function Dashboard() {
 
     setInmobiliarias((prev) => prev.map((i) => (i.id === id ? data[0] : i)));
   };
+
+  // Al cambiar de estado, el subestado se borra
+  const cambiarEstado = (id, tipo) => actualizar(id, { estado: tipo, subestado: '' });
+  const cambiarSubestado = (id, valor) => actualizar(id, { subestado: valor });
 
   const guardarNotas = async (inmo) => {
     if (!supabase) return;
@@ -193,9 +196,18 @@ export default function Dashboard() {
     return acc;
   }, {});
 
-  const filtradas = baseFiltrada.filter(
-    (inmo) => filtroEstado === 'todos' || estadoDe(inmo) === filtroEstado
-  );
+  const filtradas = baseFiltrada.filter((inmo) => {
+    if (filtroEstado !== 'todos' && estadoDe(inmo) !== filtroEstado) return false;
+    if (filtroSub === '') return true;
+    return (subestadoDe(inmo) || 'ninguno') === filtroSub;
+  });
+
+  const subBase = baseFiltrada.filter((inmo) => estadoDe(inmo) === filtroEstado);
+  const subConteo = subBase.reduce((acc, inmo) => {
+    const k = subestadoDe(inmo) || 'ninguno';
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
 
   const provincias = ['Todas provincias', ...new Set(inmobiliarias.map((i) => i.provincia))];
 
@@ -299,7 +311,7 @@ export default function Dashboard() {
           return (
             <button
               key={e.valor || 'sin'}
-              onClick={() => setFiltroEstado(e.valor)}
+              onClick={() => { setFiltroEstado(e.valor); setFiltroSub(''); }}
               aria-pressed={activo}
               style={{
                 padding: '6px 12px',
@@ -319,6 +331,36 @@ export default function Dashboard() {
         })}
       </div>
 
+      {CON_SUBESTADO.includes(filtroEstado) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginBottom: '1.5rem', marginTop: '-0.5rem' }}>
+          <span style={{ fontSize: '12px', color: '#666', fontWeight: 700 }}>SUBESTADO</span>
+          {[{ valor: '', etiqueta: 'Todos', color: '#0f172a' }, ...SUBESTADOS, { valor: 'ninguno', etiqueta: 'Sin subestado', color: '#999' }].map((sb) => {
+            const activo = filtroSub === sb.valor;
+            const n = sb.valor === '' ? subBase.length : subConteo[sb.valor] || 0;
+            return (
+              <button
+                key={sb.valor || 'todos'}
+                onClick={() => setFiltroSub(sb.valor)}
+                aria-pressed={activo}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  border: `2px solid ${sb.color}`,
+                  backgroundColor: activo ? sb.color : 'white',
+                  color: activo ? 'white' : sb.color,
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {sb.etiqueta} ({n})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {filtradas.length === 0 && inmobiliarias.length > 0 && (
         <p style={{ color: '#666', fontSize: '13px' }}>Ninguna inmobiliaria con este estado. Pulsa "Todos" para ver la lista completa.</p>
       )}
@@ -331,14 +373,16 @@ export default function Dashboard() {
               <th style={{ ...th, width: '10%' }}>Provincia</th>
               <th style={{ ...th, width: '10%' }}>Telefono</th>
               <th style={{ ...th, width: '7%', textAlign: 'center' }}>Viviendas</th>
-              <th style={{ ...th, width: '16%' }}>Estado</th>
-              <th style={{ ...th, width: '37%' }}>Anotaciones</th>
+              <th style={{ ...th, width: '17%' }}>Estado</th>
+              <th style={{ ...th, width: '36%' }}>Anotaciones</th>
             </tr>
           </thead>
           <tbody>
             {filtradas.map((inmo) => {
               const actual = estadoDe(inmo);
               const color = colorDe(actual);
+              const sub = subestadoDe(inmo);
+              const colorSub = colorSubDe(sub);
               const texto = borradores[inmo.id] !== undefined ? borradores[inmo.id] : (inmo.notas || '');
               return (
                 <tr key={inmo.id} style={{ borderBottom: '1px solid #eee' }}>
@@ -379,6 +423,30 @@ export default function Dashboard() {
                         <option key={e.valor} value={e.valor}>{e.etiqueta}</option>
                       ))}
                     </select>
+                    {CON_SUBESTADO.includes(actual) && (
+                      <select
+                        value={sub}
+                        onChange={(e) => cambiarSubestado(inmo.id, e.target.value)}
+                        style={{
+                          width: '100%',
+                          marginTop: '6px',
+                          padding: '5px 8px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          borderRadius: '4px',
+                          border: `2px solid ${sub ? colorSub : '#ddd'}`,
+                          backgroundColor: 'white',
+                          color: sub ? colorSub : '#666',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        <option value="">{'\u2014 Subestado \u2014'}</option>
+                        {SUBESTADOS.map((x) => (
+                          <option key={x.valor} value={x.valor}>{x.etiqueta}</option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td style={td}>
                     <div style={{ position: 'relative' }}>
