@@ -25,6 +25,7 @@ const PESTANAS = [
   { id: 'oferta', etiqueta: 'Oferta y cierre', ph: 'Qu\u00e9 ofrecemos, precio orientativo, enlace a la demo, siguiente paso \u00fanico...' },
   { id: 'aprendizajes', etiqueta: 'Aprendizajes', ph: 'Fecha \u2014 qu\u00e9 funcion\u00f3 / qu\u00e9 fall\u00f3 en las llamadas...' },
   { id: 'plantillas', etiqueta: 'Plantillas', ph: 'WhatsApp / email de seguimiento listos para copiar...' },
+  { id: 'correos', etiqueta: 'Correos promo', ph: 'Un correo por línea. Correos a los que tenemos que enviar la info...' },
 ];
 
 const ETIQUETA_GUARDADO = {
