@@ -64,6 +64,8 @@ export default function Dashboard() {
   const [busqueda, setBusqueda] = useState('');
   const [borradores, setBorradores] = useState({});
   const [copiado, setCopiado] = useState(null);
+  const [deshacer, setDeshacer] = useState({}); // por inmobiliaria: estado anterior para poder deshacer Cogió / No coge
+  const [ultima, setUltima] = useState(null);
 
   const [notasAbiertas, setNotasAbiertas] = useState(false);
   const [pestana, setPestana] = useState('guion');
@@ -160,11 +162,11 @@ export default function Dashboard() {
     const { data, error } = await supabase.from('inmobiliarias').update(cambios).eq('id', id).select();
     if (error) {
       setAviso('No se pudo guardar: ' + error.message);
-      return;
+      return null;
     }
     if (!data || data.length === 0) {
       setAviso('No se guardó nada. Falta la política RLS de UPDATE en Supabase.');
-      return;
+      return null;
     }
     setFilas((prev) => prev.map((f) => (f.id === id ? data[0] : f)));
 
@@ -173,10 +175,32 @@ export default function Dashboard() {
       const res = await supabase.from('eventos').insert(nuevo).select();
       if (res.error) {
         setAviso('Se guardó el cambio, pero no el historial: ' + res.error.message);
-        return;
+        return null;
       }
       setEventos((prev) => [...(res.data || []), ...prev]);
+      return (res.data || [])[0] || { id: null };
     }
+    return { id: null };
+  };
+
+  // Llamada (Cogió / No coge) con posibilidad de deshacer: guarda el estado anterior de la fila
+  const registrarLlamada = async (f, cambios, tipo) => {
+    const previo = {};
+    Object.keys(cambios).forEach((k) => { previo[k] = f[k] === undefined ? null : f[k]; });
+    const ev = await actualizar(f.id, cambios, { tipo });
+    if (!ev) return;
+    setDeshacer((prev) => ({ ...prev, [f.id]: { previo, eventoId: ev.id, tipo } }));
+    setUltima({ id: f.id, nombre: f.nombre, tipo });
+  };
+
+  const deshacerLlamada = async (id) => {
+    const d = deshacer[id];
+    if (!d) return;
+    // Se restaura la fila y se anota un evento "deshacer" que anula la llamada en estadísticas y actividad
+    const ev = await actualizar(id, d.previo, { tipo: 'deshacer', de: String(d.eventoId) });
+    if (!ev) return;
+    setDeshacer((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    setUltima((u) => (u && u.id === id ? null : u));
   };
 
   const requiereYo = () => {
@@ -195,7 +219,7 @@ export default function Dashboard() {
     };
     // No coge NO cambia la etapa: sigue en "Sin contactar" hasta que se hable con ellos.
     if (!f.responsable) cambios.responsable = yo;
-    actualizar(f.id, cambios, { tipo: 'no_coge' });
+    registrarLlamada(f, cambios, 'no_coge');
   };
 
   const marcarCogio = (f) => {
@@ -206,7 +230,7 @@ export default function Dashboard() {
     };
     if (!f.etapa || f.etapa === 'sin_contactar' || f.etapa === 'no_coge') cambios.etapa = 'hablo';
     if (!f.responsable) cambios.responsable = yo;
-    actualizar(f.id, cambios, { tipo: 'cogida' });
+    registrarLlamada(f, cambios, 'cogida');
   };
 
   const cambiarEtapa = (f, nueva) => {
@@ -258,15 +282,21 @@ export default function Dashboard() {
     [filas]
   );
 
+  // Los eventos anulados con "Deshacer" no cuentan en ningún sitio
+  const eventosValidos = useMemo(() => {
+    const anulados = new Set(eventos.filter((e) => e.tipo === 'deshacer').map((e) => String(e.de)));
+    return eventos.filter((e) => e.tipo !== 'deshacer' && !anulados.has(String(e.id)));
+  }, [eventos]);
+
   const kpis = useMemo(() => {
-    const hoyEv = eventos.filter((e) => fechaLocal(new Date(e.creado)) === hoy);
+    const hoyEv = eventosValidos.filter((e) => fechaLocal(new Date(e.creado)) === hoy);
     const porPersona = PERSONAS.map((p) => ({
       ...p,
       cogidas: hoyEv.filter((e) => e.persona === p.valor && e.tipo === 'cogida').length,
       llamadas: hoyEv.filter((e) => e.persona === p.valor && (e.tipo === 'cogida' || e.tipo === 'no_coge')).length,
     }));
     const lunes = lunesSemana();
-    const delaSemana = eventos.filter((e) => fechaLocal(new Date(e.creado)) >= lunes);
+    const delaSemana = eventosValidos.filter((e) => fechaLocal(new Date(e.creado)) >= lunes);
     porPersona.forEach((p) => {
       p.cogidasSemana = delaSemana.filter((e) => e.persona === p.valor && e.tipo === 'cogida').length;
     });
@@ -288,7 +318,7 @@ export default function Dashboard() {
     };
     porPersona.forEach((p) => { p.tasa = tasa(delaSemana.filter((e) => e.persona === p.valor)); });
     return { porPersona, pasos, tasaTotal: tasa(delaSemana) };
-  }, [eventos, hoy]);
+  }, [eventosValidos, hoy]);
 
   const conteoEtapas = useMemo(() => {
     const c = {};
@@ -472,7 +502,9 @@ export default function Dashboard() {
                   <td style={td}>
                     <button style={boton('#16a34a')} onClick={() => marcarCogio(f)}>✓ Cogió</button>
                     <button style={{ ...boton('#f59e0b'), marginTop: '6px' }} onClick={() => marcarNoCoge(f)}>✗ No coge</button>
-                    {hechaHoy(f) && <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px', textAlign: 'center' }}>llamada hoy</div>}
+                    {deshacer[f.id] ? (
+                      <button style={{ ...boton('#64748b'), marginTop: '6px' }} onClick={() => deshacerLlamada(f.id)}>↶ Deshacer</button>
+                    ) : hechaHoy(f) && <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px', textAlign: 'center' }}>llamada hoy</div>}
                   </td>
                 )}
               </tr>
@@ -553,6 +585,14 @@ export default function Dashboard() {
       {aviso && (
         <div style={{ padding: '10px 14px', marginBottom: '1rem', borderRadius: '4px', backgroundColor: '#fff4e5', border: '1px solid #f59e0b', fontSize: '13px' }}>
           {aviso}
+        </div>
+      )}
+
+      {ultima && deshacer[ultima.id] && !esStats && (
+        <div style={{ position: 'fixed', left: '50%', bottom: '20px', transform: 'translateX(-50%)', zIndex: 20, display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', borderRadius: '8px', backgroundColor: '#0f172a', color: 'white', fontSize: '13px', boxShadow: '0 4px 14px rgba(0,0,0,.25)' }}>
+          <span>{ultima.tipo === 'cogida' ? 'Cogió' : 'No coge'}: <b>{ultima.nombre}</b></span>
+          <button onClick={() => deshacerLlamada(ultima.id)} style={{ padding: '4px 12px', borderRadius: '6px', border: '2px solid white', backgroundColor: 'transparent', color: 'white', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>↶ Deshacer</button>
+          <button onClick={() => setUltima(null)} aria-label="Cerrar" style={{ border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '16px' }}>×</button>
         </div>
       )}
 
@@ -737,10 +777,10 @@ export default function Dashboard() {
 
           {vista === 'actividad' && (
             <div>
-              {eventos.filter((e) => e.persona === yo).length === 0 && <p style={{ color: '#666', fontSize: '13px' }}>Todavía no hay actividad tuya registrada.</p>}
+              {eventosValidos.filter((e) => e.persona === yo).length === 0 && <p style={{ color: '#666', fontSize: '13px' }}>Todavía no hay actividad tuya registrada.</p>}
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <tbody>
-                  {eventos.filter((e) => e.persona === yo).slice(0, 60).map((e) => (
+                  {eventosValidos.filter((e) => e.persona === yo).slice(0, 60).map((e) => (
                     <tr key={e.id} style={{ borderBottom: '1px solid #eee' }}>
                       <td style={{ ...td, width: '14%', color: '#777' }}>{new Date(e.creado).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                       <td style={{ ...td, width: '30%', fontWeight: 600 }}>{nombreDe(e.inmobiliaria_id)}</td>
