@@ -25,11 +25,19 @@ const ETIQUETA_GUARDADO = {
   error: 'Error al guardar las notas',
 };
 
+// Vistas personales (solo ven lo suyo) y comunes (las ven los dos igual)
 const VISTAS = [
   { id: 'hoy', etiqueta: 'Hoy' },
-  { id: 'todas', etiqueta: 'Todas' },
+  { id: 'todas', etiqueta: 'Mis contactos' },
   { id: 'emails', etiqueta: 'Emails' },
-  { id: 'actividad', etiqueta: 'Actividad' },
+  { id: 'actividad', etiqueta: 'Mi actividad' },
+  { id: 'clientes', etiqueta: 'Clientes (común)' },
+  { id: 'descartadas', etiqueta: 'Descartadas (común)' },
+];
+const MODOS = [
+  { valor: 'gonzalo', etiqueta: 'Soy Gonzalo', color: '#db2777' },
+  { valor: 'rafael', etiqueta: 'Soy Rafael', color: '#0d9488' },
+  { valor: 'estadisticas', etiqueta: 'Estadísticas', color: '#0f172a' },
 ];
 
 const CERRADAS = ['cliente', 'descartada'];
@@ -48,11 +56,10 @@ export default function Dashboard() {
   const [supabase, setSupabase] = useState(null);
   const [aviso, setAviso] = useState(null);
 
-  const [yo, setYo] = useState('');
+  const [modo, setModo] = useState('estadisticas');
+  const yo = modo === 'estadisticas' ? '' : modo;
   const [vista, setVista] = useState('hoy');
-  const [soloMias, setSoloMias] = useState(true);
   const [filtroEtapa, setFiltroEtapa] = useState('activas');
-  const [filtroResp, setFiltroResp] = useState('todos');
   const [filtroProv, setFiltroProv] = useState('Todas provincias');
   const [busqueda, setBusqueda] = useState('');
   const [borradores, setBorradores] = useState({});
@@ -66,14 +73,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     try {
-      const guardado = window.localStorage.getItem('luminaxe_yo');
-      if (guardado) setYo(guardado);
+      const guardado = window.localStorage.getItem('luminaxe_modo') || window.localStorage.getItem('luminaxe_yo');
+      if (guardado && MODOS.some((m) => m.valor === guardado)) setModo(guardado);
     } catch (e) {}
   }, []);
 
-  const elegirYo = (valor) => {
-    setYo(valor);
-    try { window.localStorage.setItem('luminaxe_yo', valor); } catch (e) {}
+  const elegirModo = (valor) => {
+    setModo(valor);
+    setVista('hoy');
+    setBusqueda('');
+    setFiltroEtapa('activas');
+    try { window.localStorage.setItem('luminaxe_modo', valor); } catch (e) {}
   };
 
   useEffect(() => {
@@ -181,9 +191,9 @@ export default function Dashboard() {
       intentos: (f.intentos || 0) + 1,
       ultimo_contacto: new Date().toISOString(),
       proxima_accion: 'Volver a llamar',
-      proxima_fecha: proximoLaborable(),
+      proxima_fecha: esLaborable() ? fechaLocal() : proximoLaborable(),
     };
-    if (!f.etapa || f.etapa === 'sin_contactar') cambios.etapa = 'no_coge';
+    // No coge NO cambia la etapa: sigue en "Sin contactar" hasta que se hable con ellos.
     if (!f.responsable) cambios.responsable = yo;
     actualizar(f.id, cambios, { tipo: 'no_coge' });
   };
@@ -202,6 +212,7 @@ export default function Dashboard() {
   const cambiarEtapa = (f, nueva) => {
     const cambios = { etapa: nueva };
     if (nueva !== 'descartada') cambios.motivo_descarte = null;
+    if (!f.responsable && !CERRADAS.includes(nueva)) cambios.responsable = yo || 'rafael';
     actualizar(f.id, cambios, { tipo: 'etapa', de: f.etapa || 'sin_contactar', a: nueva });
   };
 
@@ -270,51 +281,63 @@ export default function Dashboard() {
       { etiqueta: 'Pruebas enviadas', n: etapaN('prueba_enviada') },
       { etiqueta: 'Clientes', n: etapaN('cliente') },
     ];
-    return { porPersona, pasos };
+    const tasa = (lista) => {
+      const l = lista.filter((e) => e.tipo === 'cogida' || e.tipo === 'no_coge').length;
+      const c = lista.filter((e) => e.tipo === 'cogida').length;
+      return { llamadas: l, cogidas: c, pct: l ? Math.round((c / l) * 100) : null };
+    };
+    porPersona.forEach((p) => { p.tasa = tasa(delaSemana.filter((e) => e.persona === p.valor)); });
+    return { porPersona, pasos, tasaTotal: tasa(delaSemana) };
   }, [eventos, hoy]);
 
   const conteoEtapas = useMemo(() => {
     const c = {};
-    filas.forEach((f) => { const e = etapaFila(f); c[e] = (c[e] || 0) + 1; });
+    filas.filter((f) => f.responsable === yo).forEach((f) => { const e = etapaFila(f); c[e] = (c[e] || 0) + 1; });
     return c;
-  }, [filas]);
+  }, [filas, yo]);
 
   const coincideBusqueda = (f) => {
     const q = busqueda.toLowerCase();
     return !q || (f.nombre || '').toLowerCase().includes(q) || (f.decisor || '').toLowerCase().includes(q);
   };
 
+  const hechaHoy = (f) => f.ultimo_contacto && fechaLocal(new Date(f.ultimo_contacto)) === hoy;
+
   const visibles = useMemo(() => {
+    const mias = filas.filter((f) => f.responsable === yo && coincideBusqueda(f));
     if (vista === 'hoy') {
-      return filas
+      return mias
         .filter((f) => {
-          if (CERRADAS.includes(etapaFila(f))) return false;
-          if (soloMias && yo && f.responsable !== yo) return false;
-          if (!coincideBusqueda(f)) return false;
+          const e = etapaFila(f);
+          if (CERRADAS.includes(e)) return false;
+          const pendiente = e === 'sin_contactar' || e === 'no_coge';
           const vence = f.proxima_fecha && f.proxima_fecha <= fechaTrabajo;
-          const primera = etapaFila(f) === 'sin_contactar' && f.responsable;
-          return vence || primera;
+          return pendiente || vence;
         })
         .sort((a, b) => {
+          // las ya llamadas hoy (no cogieron) pasan al final; el resto por fecha
+          const ha = hechaHoy(a) ? 1 : 0;
+          const hb = hechaHoy(b) ? 1 : 0;
+          if (ha !== hb) return ha - hb;
           const fa = a.proxima_fecha || '9999';
           const fb = b.proxima_fecha || '9999';
           return fa < fb ? -1 : fa > fb ? 1 : 0;
         });
     }
-    return filas.filter((f) => {
+    if (vista === 'clientes') return filas.filter((f) => etapaFila(f) === 'cliente' && coincideBusqueda(f));
+    if (vista === 'descartadas') return filas.filter((f) => etapaFila(f) === 'descartada' && coincideBusqueda(f));
+    return mias.filter((f) => {
       const e = etapaFila(f);
-      if (filtroEtapa === 'activas' && CERRADAS.includes(e)) return false;
-      if (filtroEtapa !== 'activas' && filtroEtapa !== 'todas' && e !== filtroEtapa) return false;
-      if (filtroResp === 'sin' && f.responsable) return false;
-      if (filtroResp !== 'todos' && filtroResp !== 'sin' && f.responsable !== filtroResp) return false;
+      if (CERRADAS.includes(e)) return false;
+      if (filtroEtapa !== 'activas' && e !== filtroEtapa) return false;
       if (filtroProv !== 'Todas provincias' && f.provincia !== filtroProv) return false;
-      return coincideBusqueda(f);
+      return true;
     });
-  }, [filas, vista, soloMias, yo, filtroEtapa, filtroResp, filtroProv, busqueda, hoy, fechaTrabajo]);
+  }, [filas, vista, yo, filtroEtapa, filtroProv, busqueda, hoy, fechaTrabajo]);
 
-  const emailsPendientes = filas.filter((f) => esEmail(f.jefe) && !CERRADAS.includes(etapaFila(f)) && !f.email_enviado_at && coincideBusqueda(f));
+  const emailsPendientes = filas.filter((f) => f.responsable === yo && esEmail(f.jefe) && !CERRADAS.includes(etapaFila(f)) && !f.email_enviado_at && coincideBusqueda(f));
   const emailsEnviados = filas
-    .filter((f) => esEmail(f.jefe) && f.email_enviado_at && coincideBusqueda(f))
+    .filter((f) => f.responsable === yo && esEmail(f.jefe) && f.email_enviado_at && coincideBusqueda(f))
     .sort((a, b) => (a.email_enviado_at < b.email_enviado_at ? 1 : -1));
 
   const nombreDe = (id) => filas.find((f) => String(f.id) === String(id))?.nombre || `#${id}`;
@@ -340,7 +363,7 @@ export default function Dashboard() {
     color, fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', width: '100%',
   });
 
-  const tablaPrincipal = (
+  const tabla = (conLlamada) => (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
         <thead>
@@ -351,7 +374,7 @@ export default function Dashboard() {
             <th style={{ ...th, width: '8%' }}>Último contacto</th>
             <th style={{ ...th, width: '14%' }}>Próxima acción</th>
             <th style={{ ...th, width: '21%' }}>Anotaciones</th>
-            <th style={{ ...th, width: '10%' }}>Llamada</th>
+            {conLlamada && <th style={{ ...th, width: '10%' }}>Llamada</th>}
           </tr>
         </thead>
         <tbody>
@@ -392,11 +415,10 @@ export default function Dashboard() {
                 </td>
                 <td style={td}>
                   <select
-                    value={f.responsable || ''}
+                    value={f.responsable || 'rafael'}
                     onChange={(ev) => cambiarResponsable(f, ev.target.value)}
                     style={{ ...campo, marginBottom: '6px', fontWeight: 600, color: personaDe(f.responsable)?.color || '#666' }}
                   >
-                    <option value="">— Sin responsable —</option>
                     {PERSONAS.map((p) => <option key={p.valor} value={p.valor}>{p.etiqueta}</option>)}
                   </select>
                   <select
@@ -446,10 +468,13 @@ export default function Dashboard() {
                     style={{ ...campo, lineHeight: 1.4, resize: 'none', overflow: 'hidden', display: 'block' }}
                   />
                 </td>
-                <td style={td}>
-                  <button style={boton('#16a34a')} onClick={() => marcarCogio(f)}>✓ Cogió</button>
-                  <button style={{ ...boton('#f59e0b'), marginTop: '6px' }} onClick={() => marcarNoCoge(f)}>✗ No coge</button>
-                </td>
+                {conLlamada && (
+                  <td style={td}>
+                    <button style={boton('#16a34a')} onClick={() => marcarCogio(f)}>✓ Cogió</button>
+                    <button style={{ ...boton('#f59e0b'), marginTop: '6px' }} onClick={() => marcarNoCoge(f)}>✗ No coge</button>
+                    {hechaHoy(f) && <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px', textAlign: 'center' }}>llamada hoy</div>}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -487,15 +512,39 @@ export default function Dashboard() {
     </div>
   );
 
+  const persona = personaDe(yo);
+  const esStats = modo === 'estadisticas';
+  const miKpi = kpis.porPersona.find((p) => p.valor === yo);
+  const vistasVisibles = VISTAS;
+  const etapasMias = ETAPAS.filter((x) => !CERRADAS.includes(x.valor));
+  const conteoActivas = etapasMias.reduce((n, x) => n + (conteoEtapas[x.valor] || 0), 0);
+
+  const cajaPersona = (p, grande) => {
+    const pct = Math.min(100, Math.round((p.cogidas / OBJETIVO_DIARIO) * 100));
+    return (
+      <div key={p.valor} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 14px', backgroundColor: 'white', minWidth: grande ? '320px' : '260px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700, color: p.color }}>
+          <span>{p.etiqueta.toUpperCase()} · {laborable ? 'HOY' : 'FIN DE SEMANA'}</span>
+          <span>{laborable ? `${p.cogidas}/${OBJETIVO_DIARIO} cogidas` : 'sin llamadas'}</span>
+        </div>
+        <div style={{ height: '8px', borderRadius: '4px', backgroundColor: '#eef2f7', margin: '8px 0 6px', overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', backgroundColor: p.color }} />
+        </div>
+        <div style={{ fontSize: '12px', color: '#666' }}>
+          {laborable ? `${p.llamadas} llamadas hoy · ` : ''}semana: {p.cogidasSemana}/{OBJETIVO_DIARIO * DIAS_LABORABLES} cogidas
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1600px', margin: '0 auto' }}>
+    <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1600px', margin: '0 auto', borderTop: `6px solid ${persona ? persona.color : '#0f172a'}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', marginBottom: '1rem' }}>
-        <h1 style={{ margin: 0 }}>Dashboard Luminaxe</h1>
+        <h1 style={{ margin: 0 }}>Dashboard Luminaxe{persona ? <span style={{ color: persona.color }}> · {persona.etiqueta}</span> : ' · Estadísticas'}</h1>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#666' }}>SOY</span>
-          {PERSONAS.map((p) => (
-            <button key={p.valor} onClick={() => elegirYo(p.valor)} aria-pressed={yo === p.valor} style={chip(p.color, yo === p.valor)}>
-              {p.etiqueta}
+          {MODOS.map((m) => (
+            <button key={m.valor} onClick={() => elegirModo(m.valor)} aria-pressed={modo === m.valor} style={chip(m.color, modo === m.valor)}>
+              {m.etiqueta}
             </button>
           ))}
         </div>
@@ -507,168 +556,206 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Indicadores */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px', marginBottom: '1.5rem' }}>
-        {kpis.porPersona.map((p) => {
-          const pct = Math.min(100, Math.round((p.cogidas / OBJETIVO_DIARIO) * 100));
-          return (
-            <div key={p.valor} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 14px', backgroundColor: 'white' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700, color: p.color }}>
-                <span>{p.etiqueta.toUpperCase()} · {laborable ? 'HOY' : 'FIN DE SEMANA'}</span>
-                <span>{laborable ? `${p.cogidas}/${OBJETIVO_DIARIO} cogidas` : 'sin llamadas'}</span>
-              </div>
-              <div style={{ height: '8px', borderRadius: '4px', backgroundColor: '#eef2f7', margin: '8px 0 6px', overflow: 'hidden' }}>
-                <div style={{ width: `${pct}%`, height: '100%', backgroundColor: p.color }} />
-              </div>
-              <div style={{ fontSize: '12px', color: '#666' }}>
-                {laborable ? `${p.llamadas} llamadas hoy · ` : ''}semana: {p.cogidasSemana}/{OBJETIVO_DIARIO * DIAS_LABORABLES} cogidas
-              </div>
+      {esStats && (
+        <div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '1.5rem' }}>
+            {kpis.porPersona.map((p) => cajaPersona(p, true))}
+          </div>
+
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 14px', backgroundColor: 'white', marginBottom: '1.5rem' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>EMBUDO · ESTA SEMANA (desde el lunes, los dos juntos)</div>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: '6px' }}>
+              {kpis.pasos.map((p, i) => {
+                const ant = i > 0 ? kpis.pasos[i - 1].n : 0;
+                const conv = i > 0 && ant > 0 ? Math.round((p.n / ant) * 100) : null;
+                return (
+                  <div key={p.etiqueta} style={{ flex: 1, textAlign: 'center', padding: '6px 4px', backgroundColor: '#f8fafc', borderRadius: '6px' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a' }}>{p.n}</div>
+                    <div style={{ fontSize: '11px', color: '#555' }}>{p.etiqueta}</div>
+                    <div style={{ fontSize: '10px', color: '#94a3b8', height: '12px' }}>{conv !== null ? `${conv}% del paso anterior` : ''}</div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-        <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 14px', backgroundColor: 'white', gridColumn: 'span 2' }}>
-          <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>EMBUDO · ESTA SEMANA (desde el lunes)</div>
-          <div style={{ display: 'flex', alignItems: 'stretch', gap: '6px' }}>
-            {kpis.pasos.map((p, i) => {
-              const ant = i > 0 ? kpis.pasos[i - 1].n : 0;
-              const conv = i > 0 && ant > 0 ? Math.round((p.n / ant) * 100) : null;
-              return (
-                <div key={p.etiqueta} style={{ flex: 1, textAlign: 'center', padding: '6px 4px', backgroundColor: '#f8fafc', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a' }}>{p.n}</div>
-                  <div style={{ fontSize: '11px', color: '#555' }}>{p.etiqueta}</div>
-                  <div style={{ fontSize: '10px', color: '#94a3b8', height: '12px' }}>{conv !== null ? `${conv}% del paso anterior` : ''}</div>
-                </div>
-              );
-            })}
+          </div>
+
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 14px', backgroundColor: 'white', marginBottom: '1.5rem' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>TASA DE COGER · ESTA SEMANA</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #ddd' }}>
+                  <th style={th}></th><th style={th}>Llamadas</th><th style={th}>Cogidas</th><th style={th}>No cogen</th><th style={th}>Tasa de coger</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...kpis.porPersona.map((p) => ({ nombre: p.etiqueta, color: p.color, t: p.tasa })), { nombre: 'Total', color: '#0f172a', t: kpis.tasaTotal }].map((r) => (
+                  <tr key={r.nombre} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ ...td, fontWeight: 700, color: r.color }}>{r.nombre}</td>
+                    <td style={td}>{r.t.llamadas}</td>
+                    <td style={td}>{r.t.cogidas}</td>
+                    <td style={td}>{r.t.llamadas - r.t.cogidas}</td>
+                    <td style={{ ...td, fontWeight: 700 }}>{r.t.pct === null ? '—' : `${r.t.pct}%`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 14px', backgroundColor: 'white' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>CONTACTOS POR ETAPA</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #ddd' }}>
+                  <th style={th}>Etapa</th>
+                  {PERSONAS.map((p) => <th key={p.valor} style={{ ...th, color: p.color }}>{p.etiqueta}</th>)}
+                  <th style={th}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ETAPAS.map((x) => {
+                  const n = (v) => filas.filter((f) => etapaFila(f) === x.valor && (v ? f.responsable === v : true)).length;
+                  const comun = CERRADAS.includes(x.valor);
+                  return (
+                    <tr key={x.valor} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ ...td, fontWeight: 700, color: x.color }}>{x.etiqueta}</td>
+                      {PERSONAS.map((p) => <td key={p.valor} style={td}>{comun ? '—' : n(p.valor)}</td>)}
+                      <td style={{ ...td, fontWeight: 700 }}>{n(null)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
-
-      {/* Notas generales (plegables) */}
-      <div style={{ backgroundColor: '#f5f5f5', padding: '10px 14px', borderRadius: '4px', marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-          <button
-            onClick={() => setNotasAbiertas((a) => !a)}
-            style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '12px', color: '#444', fontFamily: 'inherit' }}
-          >
-            {notasAbiertas ? '▾' : '▸'} NOTAS Y GUIÓN
-          </button>
-          {notasAbiertas && PESTANAS.map((p) => (
-            <button key={p.id} onClick={() => setPestana(p.id)} aria-pressed={pestana === p.id} style={chip('#0f172a', pestana === p.id, true)}>
-              {p.etiqueta}
-            </button>
-          ))}
-          {notasAbiertas && (
-            <span style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: estadoNotas === 'error' ? '#dc2626' : estadoNotas === 'guardado' ? '#16a34a' : '#666' }}>
-              {ETIQUETA_GUARDADO[estadoNotas]}
-            </span>
-          )}
-        </div>
-        {notasAbiertas && (
-          <textarea
-            value={notasGenerales[pestana] || ''}
-            onChange={(ev) => cambiarNotaGeneral(pestana, ev.target.value)}
-            placeholder={pestanaActiva.ph}
-            disabled={estadoNotas === 'cargando'}
-            style={{ width: '100%', minHeight: '200px', marginTop: '10px', padding: '10px 12px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '13px', fontFamily: 'inherit', lineHeight: 1.5, resize: 'vertical', boxSizing: 'border-box', display: 'block', backgroundColor: 'white' }}
-          />
-        )}
-      </div>
-
-      {/* Vistas */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '1rem', borderBottom: '2px solid #eee', paddingBottom: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {VISTAS.map((v) => (
-          <button key={v.id} onClick={() => setVista(v.id)} aria-pressed={vista === v.id} style={chip('#0f172a', vista === v.id)}>
-            {v.etiqueta}
-          </button>
-        ))}
-        {(vista === 'hoy' || vista === 'todas' || vista === 'emails') && (
-          <input
-            type="text" placeholder="Buscar inmobiliaria o decisor..." value={busqueda}
-            onChange={(ev) => setBusqueda(ev.target.value)}
-            style={{ marginLeft: 'auto', padding: '7px 12px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '13px', minWidth: '260px' }}
-          />
-        )}
-      </div>
-
-      {vista === 'hoy' && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', fontSize: '13px', color: '#555' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-              <input type="checkbox" checked={soloMias} onChange={(ev) => setSoloMias(ev.target.checked)} />
-              Solo las mías{yo ? ` (${personaDe(yo)?.etiqueta})` : ' (elige quién eres arriba)'}
-            </label>
-            <span>
-              {laborable
-                ? `${visibles.length} para hoy: llamadas con fecha vencida y primeras llamadas pendientes.`
-                : `Hoy no se llama (fin de semana). El lunes tocan ${visibles.length}.`}
-            </span>
-          </div>
-          {visibles.length === 0 && <p style={{ color: '#666', fontSize: '13px' }}>Nada pendiente para hoy. Mira la vista "Todas" para asignar más contactos.</p>}
-          {tablaPrincipal}
-        </>
       )}
 
-      {vista === 'todas' && (
+      {!esStats && (
         <>
-          {filtroEtapa === 'descartada' && (
-            <p style={{ fontSize: '12px', color: '#666', margin: '0 0 8px' }}>
-              Lista de descartadas: no se borran nunca. Es la lista negra que el agente de prospección consulta para no volver a proponerlas.
-            </p>
-          )}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-            {[
-              { valor: 'activas', etiqueta: `Activas (${filas.filter((f) => !CERRADAS.includes(etapaFila(f))).length})`, color: '#0f172a' },
-              { valor: 'todas', etiqueta: `Todas (${filas.length})`, color: '#0f172a' },
-              ...ETAPAS.map((x) => ({ valor: x.valor, etiqueta: `${x.etiqueta} (${conteoEtapas[x.valor] || 0})`, color: x.color })),
-            ].map((x) => (
-              <button key={x.valor} onClick={() => setFiltroEtapa(x.valor)} aria-pressed={filtroEtapa === x.valor} style={chip(x.color, filtroEtapa === x.valor)}>
-                {x.etiqueta}
+          {miKpi && <div style={{ marginBottom: '1.25rem', maxWidth: '420px' }}>{cajaPersona(miKpi, true)}</div>}
+
+          {/* Notas generales (plegables) */}
+          <div style={{ backgroundColor: '#f5f5f5', padding: '10px 14px', borderRadius: '4px', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+              <button
+                onClick={() => setNotasAbiertas((a) => !a)}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '12px', color: '#444', fontFamily: 'inherit' }}
+              >
+                {notasAbiertas ? '▾' : '▸'} NOTAS Y GUIÓN (comunes)
+              </button>
+              {notasAbiertas && PESTANAS.map((p) => (
+                <button key={p.id} onClick={() => setPestana(p.id)} aria-pressed={pestana === p.id} style={chip('#0f172a', pestana === p.id, true)}>
+                  {p.etiqueta}
+                </button>
+              ))}
+              {notasAbiertas && (
+                <span style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: estadoNotas === 'error' ? '#dc2626' : estadoNotas === 'guardado' ? '#16a34a' : '#666' }}>
+                  {ETIQUETA_GUARDADO[estadoNotas]}
+                </span>
+              )}
+            </div>
+            {notasAbiertas && (
+              <textarea
+                value={notasGenerales[pestana] || ''}
+                onChange={(ev) => cambiarNotaGeneral(pestana, ev.target.value)}
+                placeholder={pestanaActiva.ph}
+                disabled={estadoNotas === 'cargando'}
+                style={{ width: '100%', minHeight: '200px', marginTop: '10px', padding: '10px 12px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '13px', fontFamily: 'inherit', lineHeight: 1.5, resize: 'vertical', boxSizing: 'border-box', display: 'block', backgroundColor: 'white' }}
+              />
+            )}
+          </div>
+
+          {/* Vistas */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '1rem', borderBottom: '2px solid #eee', paddingBottom: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {vistasVisibles.map((v) => (
+              <button key={v.id} onClick={() => setVista(v.id)} aria-pressed={vista === v.id} style={chip(v.id === 'clientes' || v.id === 'descartadas' ? '#64748b' : persona.color, vista === v.id)}>
+                {v.etiqueta}
               </button>
             ))}
+            {vista !== 'actividad' && (
+              <input
+                type="text" placeholder="Buscar inmobiliaria o decisor..." value={busqueda}
+                onChange={(ev) => setBusqueda(ev.target.value)}
+                style={{ marginLeft: 'auto', padding: '7px 12px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '13px', minWidth: '260px' }}
+              />
+            )}
           </div>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            <select value={filtroResp} onChange={(ev) => setFiltroResp(ev.target.value)} style={{ padding: '7px 12px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '13px' }}>
-              <option value="todos">Todos los responsables</option>
-              {PERSONAS.map((p) => <option key={p.valor} value={p.valor}>{p.etiqueta}</option>)}
-              <option value="sin">Sin responsable</option>
-            </select>
-            <select value={filtroProv} onChange={(ev) => setFiltroProv(ev.target.value)} style={{ padding: '7px 12px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '13px' }}>
-              {provincias.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <span style={{ fontSize: '13px', color: '#666', alignSelf: 'center' }}>{visibles.length} resultados</span>
-          </div>
-          {tablaPrincipal}
-        </>
-      )}
 
-      {vista === 'emails' && (
-        <>
-          {bloqueEmails(emailsPendientes, false)}
-          {bloqueEmails(emailsEnviados, true)}
-        </>
-      )}
+          {vista === 'hoy' && (
+            <>
+              <p style={{ fontSize: '13px', color: '#555', margin: '0 0 12px' }}>
+                {laborable
+                  ? `${visibles.length} para llamar: tus contactos sin contactar y los que tienen fecha vencida. Los que no cogieron hoy pasan al final.`
+                  : `Hoy no se llama (fin de semana). El lunes tienes ${visibles.length} para llamar.`}
+              </p>
+              {visibles.length === 0 && <p style={{ color: '#666', fontSize: '13px' }}>Nada pendiente. Mira "Mis contactos".</p>}
+              {tabla(true)}
+            </>
+          )}
 
-      {vista === 'actividad' && (
-        <div>
-          {eventos.length === 0 && <p style={{ color: '#666', fontSize: '13px' }}>Todavía no hay actividad registrada.</p>}
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <tbody>
-              {eventos.slice(0, 60).map((e) => (
-                <tr key={e.id} style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ ...td, width: '14%', color: '#777' }}>{new Date(e.creado).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-                  <td style={{ ...td, width: '10%', fontWeight: 700, color: personaDe(e.persona)?.color || '#666' }}>{personaDe(e.persona)?.etiqueta || '—'}</td>
-                  <td style={{ ...td, width: '28%', fontWeight: 600 }}>{nombreDe(e.inmobiliaria_id)}</td>
-                  <td style={td}>
-                    {TIPOS_EVENTO[e.tipo] || e.tipo}
-                    {e.tipo === 'etapa' && ` — ${etapaDe(e.de).etiqueta} → ${etapaDe(e.a).etiqueta}`}
-                    {e.tipo === 'responsable' && ` — ${personaDe(e.de)?.etiqueta || 'nadie'} → ${personaDe(e.a)?.etiqueta || 'nadie'}`}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          {vista === 'todas' && (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+                {[
+                  { valor: 'activas', etiqueta: `Todas (${conteoActivas})`, color: '#0f172a' },
+                  ...etapasMias.map((x) => ({ valor: x.valor, etiqueta: `${x.etiqueta} (${conteoEtapas[x.valor] || 0})`, color: x.color })),
+                ].map((x) => (
+                  <button key={x.valor} onClick={() => setFiltroEtapa(x.valor)} aria-pressed={filtroEtapa === x.valor} style={chip(x.color, filtroEtapa === x.valor)}>
+                    {x.etiqueta}
+                  </button>
+                ))}
+                <select value={filtroProv} onChange={(ev) => setFiltroProv(ev.target.value)} style={{ padding: '7px 12px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '13px' }}>
+                  {provincias.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <span style={{ fontSize: '13px', color: '#666', alignSelf: 'center' }}>{visibles.length} resultados</span>
+              </div>
+              {tabla(true)}
+            </>
+          )}
+
+          {vista === 'clientes' && (
+            <>
+              <p style={{ fontSize: '12px', color: '#666', margin: '0 0 8px' }}>Clientes: lista común de los dos.</p>
+              {tabla(false)}
+            </>
+          )}
+
+          {vista === 'descartadas' && (
+            <>
+              <p style={{ fontSize: '12px', color: '#666', margin: '0 0 8px' }}>
+                Lista común de los dos. No se borran nunca: es la lista negra que el agente de prospección consulta para no volver a proponerlas.
+              </p>
+              {tabla(false)}
+            </>
+          )}
+
+          {vista === 'emails' && (
+            <>
+              {bloqueEmails(emailsPendientes, false)}
+              {bloqueEmails(emailsEnviados, true)}
+            </>
+          )}
+
+          {vista === 'actividad' && (
+            <div>
+              {eventos.filter((e) => e.persona === yo).length === 0 && <p style={{ color: '#666', fontSize: '13px' }}>Todavía no hay actividad tuya registrada.</p>}
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <tbody>
+                  {eventos.filter((e) => e.persona === yo).slice(0, 60).map((e) => (
+                    <tr key={e.id} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ ...td, width: '14%', color: '#777' }}>{new Date(e.creado).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                      <td style={{ ...td, width: '30%', fontWeight: 600 }}>{nombreDe(e.inmobiliaria_id)}</td>
+                      <td style={td}>
+                        {TIPOS_EVENTO[e.tipo] || e.tipo}
+                        {e.tipo === 'etapa' && ` — ${etapaDe(e.de).etiqueta} → ${etapaDe(e.a).etiqueta}`}
+                        {e.tipo === 'responsable' && ` — ${personaDe(e.de)?.etiqueta || 'nadie'} → ${personaDe(e.a)?.etiqueta || 'nadie'}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
